@@ -1,0 +1,69 @@
+# ==============================================================================
+# AURACRAFT STUDIO — ROOT .GITIGNORE
+# ==============================================================================
+
+# Node dependencies & caches
+node_modules/
+.npm/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python environments & caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+venv/
+.venv/
+env/
+.env-py/
+pip-wheel-metadata/
+
+# Build outputs & Bundlers
+dist/
+build/
+out/
+.vite/
+*.tsbuildinfo
+
+# Cloudflare Workers Edge tooling
+.wrangler/
+
+# Sensitive Environment Configurations & Secret Keys
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+!.env.production.example
+
+# Temporary media & export artifacts
+apps/backend-service/data/narrativ_exports/
+*.vrm.bak
+*.wav
+*.mp3
+*.log
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db

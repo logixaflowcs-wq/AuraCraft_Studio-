@@ -1,0 +1,632 @@
+[
+  {
+    "id": "char_anime_shinji",
+    "name": "Shinji Kazama (シンジ)",
+    "role": "Anime Protagonist / Mecha Pilot",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Determined, heroic, courageous young anime mech pilot fighting for humanity",
+    "vrm_model": "/models/sample_avatar_c.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#38bdf8",
+    "tags": [
+      "anime",
+      "shonen",
+      "mecha",
+      "hero",
+      "japanese"
+    ]
+  },
+  {
+    "id": "char_anime_sakura",
+    "name": "Sakura Hoshino (サクラ)",
+    "role": "Anime Heroine & Magical Idol",
+    "style": "anime",
+    "voice_id": "ja-JP-NanamiNeural",
+    "language": "ja-JP",
+    "personality": "Cheerful, energetic magical girl idol bringing hope and celestial light",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "happy",
+    "avatar_color": "#ec4899",
+    "tags": [
+      "anime",
+      "magical-girl",
+      "idol",
+      "vtuber",
+      "japanese"
+    ]
+  },
+  {
+    "id": "char_anime_ren",
+    "name": "Ren Kurogane (レン)",
+    "role": "Dark Fantasy Swordsman / Antihero",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Calm, brooding master swordsman with supernatural shadow abilities",
+    "vrm_model": "/models/sample_avatar_b.vrm",
+    "default_emotion": "angry",
+    "avatar_color": "#a855f7",
+    "tags": [
+      "anime",
+      "dark-fantasy",
+      "swordsman",
+      "antihero"
+    ]
+  },
+  {
+    "id": "char_army_general_min",
+    "name": "General Min Zaw (ဗိုလ်ချုပ်မင်းဇော်)",
+    "role": "Tactical Commander & Defense Strategist",
+    "style": "army",
+    "voice_id": "my-MM-ThihaNeural",
+    "language": "my-MM",
+    "personality": "Strategic, authoritative, disciplined high-ranking military commander with tactical acumen",
+    "vrm_model": "/models/sample_avatar_b.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#84cc16",
+    "tags": [
+      "army",
+      "military",
+      "tactical",
+      "burmese",
+      "commander"
+    ]
+  },
+  {
+    "id": "char_army_sergeant_kyaw",
+    "name": "Sergeant Kyaw Thu (တပ်ကြပ်ကြီးကျော်သူ)",
+    "role": "Special Operations Field Specialist",
+    "style": "army",
+    "voice_id": "my-MM-ThihaNeural",
+    "language": "my-MM",
+    "personality": "Hardened combat veteran, fearless frontline squad leader ready for special ops missions",
+    "vrm_model": "/models/sample_avatar_b.vrm",
+    "default_emotion": "angry",
+    "avatar_color": "#eab308",
+    "tags": [
+      "army",
+      "military",
+      "specops",
+      "burmese",
+      "infantry"
+    ]
+  },
+  {
+    "id": "char_army_captain_vance",
+    "name": "Captain John Vance",
+    "role": "Airborne Tactical Recon Captain",
+    "style": "army",
+    "voice_id": "en-US-GuyNeural",
+    "language": "en-US",
+    "personality": "Decisive, tactical airborne specialist delivering battlefield briefs and recon updates",
+    "vrm_model": "/models/sample_avatar_c.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#10b981",
+    "tags": [
+      "army",
+      "military",
+      "airborne",
+      "recon",
+      "english"
+    ]
+  },
+  {
+    "id": "char_myanmar_nilar",
+    "name": "Daw Nilar (ဒေါ်နီလာ - သနပ်ခါး)",
+    "role": "Traditional Thanakha Cultural Host",
+    "style": "myanmar",
+    "voice_id": "my-MM-NilarNeural",
+    "language": "my-MM",
+    "personality": "Gracious, elegant Burmese cultural ambassador with traditional thanakha artistry",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "happy",
+    "avatar_color": "#f59e0b",
+    "tags": [
+      "myanmar",
+      "traditional",
+      "burmese",
+      "cultural",
+      "female"
+    ]
+  },
+  {
+    "id": "char_myanmar_min_thar",
+    "name": "Min Thar Thant Zin (မင်းသားသန့်စင်)",
+    "role": "Classical Royal Performing Artist / Narrator",
+    "style": "myanmar",
+    "voice_id": "my-MM-ThihaNeural",
+    "language": "my-MM",
+    "personality": "Eloquent classical royal court narrator and dramatic performing artist with rich historical wisdom",
+    "vrm_model": "/models/sample_avatar_b.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#d97706",
+    "tags": [
+      "myanmar",
+      "traditional",
+      "royal-court",
+      "burmese",
+      "male"
+    ]
+  },
+  {
+    "id": "char_myanmar_may_myat",
+    "name": "May Myat Noe (မေမြတ်နိုး - အညာသူ)",
+    "role": "Bagan Traditional Heritage Guide",
+    "style": "myanmar",
+    "voice_id": "my-MM-NilarNeural",
+    "language": "my-MM",
+    "personality": "Warm, authentic Bagan heritage storyteller sharing ancient folklore and cultural traditions",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "happy",
+    "avatar_color": "#fb923c",
+    "tags": [
+      "myanmar",
+      "traditional",
+      "bagan",
+      "female"
+    ]
+  },
+  {
+    "id": "char_streamer_jenny",
+    "name": "Jenny Nova",
+    "role": "Global Streamer & Cyberpunk Host",
+    "style": "streamer",
+    "voice_id": "en-US-JennyNeural",
+    "language": "en-US",
+    "personality": "Energetic, witty, tech-savvy cyberpunk virtual streamer and gaming creator",
+    "vrm_model": "/models/sample_avatar_c.vrm",
+    "default_emotion": "surprised",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "streamer",
+      "vtuber",
+      "cyberpunk",
+      "english"
+    ]
+  },
+  {
+    "id": "char_streamer_aria",
+    "name": "Aria Synth",
+    "role": "Lo-Fi Virtual DJ & Creative Storyteller",
+    "style": "streamer",
+    "voice_id": "en-US-AriaNeural",
+    "language": "en-US",
+    "personality": "Chill, atmospheric music host and digital artist curating creative beats and stories",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "happy",
+    "avatar_color": "#8b5cf6",
+    "tags": [
+      "streamer",
+      "music",
+      "creative",
+      "lofi"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_12",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_13",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_14",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_15",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_16",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_17",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_18",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_19",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_20",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_21",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_22",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_23",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_24",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_25",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_26",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_27",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_28",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_29",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_30",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_31",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_32",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_33",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_34",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_35",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  },
+  {
+    "id": "char_anime_kenshiro_unit_01_36",
+    "name": "Kenshiro Unit 01",
+    "role": "Cyber Combat Mecha",
+    "style": "anime",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP",
+    "personality": "Fearless vanguard mecha pilot",
+    "vrm_model": "/models/sample_avatar_a.vrm",
+    "default_emotion": "neutral",
+    "avatar_color": "#06b6d4",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  }
+]

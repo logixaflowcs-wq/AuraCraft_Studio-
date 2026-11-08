@@ -1,0 +1,29 @@
+{
+  "name": "auracraft-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AuraCraft Studio: Real-Time 3D VRM Virtual Persona & Autonomous Neural Voice Studio",
+  "workspaces": [
+    "apps/web-platform/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm --prefix apps/web-platform/frontend run dev",
+    "build": "npm --prefix apps/web-platform/frontend run build",
+    "preview": "npm --prefix apps/web-platform/frontend run preview",
+    "dev:backend": "python -m uvicorn app.main:app --app-dir apps/web-platform/backend --port 8010 --reload",
+    "test:backend": "pytest apps/web-platform/backend",
+    "deploy:worker": "npx --prefix apps/web-platform/backend/cloudflare_worker wrangler deploy"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.3.4",
+    "@pixiv/three-vrm-animation": "^3.3.4",
+    "lucide-react": "^1.16.0",
+    "three": "^0.174.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.174.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  }
+}

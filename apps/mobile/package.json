@@ -1,0 +1,9 @@
+{
+  "name": "auracraft-studio-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AuraCraft Studio Mobile Companion & Live Avatar Controller (React Native / Expo)",
+  "scripts": {
+    "start": "expo start"
+  }
+}

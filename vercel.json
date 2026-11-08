@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "apps/web-platform/frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "apps/web-platform/frontend/dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/"
+    }
+  ],
+  "env": {
+    "VITE_API_URL": "https://auracraft-backend.onrender.com"
+  }
+}
