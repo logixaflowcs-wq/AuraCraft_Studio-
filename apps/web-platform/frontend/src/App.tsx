@@ -319,8 +319,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Center Page Nav Tabs */}
-        <nav className="flex items-center gap-1 bg-[#0a0d14] border border-[#23314f] p-1 rounded-xl shadow-inner text-xs">
+        {/* Center Page Nav Tabs with smooth horizontal scroll on narrower screens */}
+        <nav className="flex items-center gap-1 bg-[#0a0d14] border border-[#23314f] p-1 rounded-xl shadow-inner text-xs overflow-x-auto max-w-[50vw] xl:max-w-none no-scrollbar flex-shrink">
           {navItems.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;

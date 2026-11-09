@@ -161,10 +161,13 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({ character, onPromp
         </button>
       </div>
 
-      {/* Form Fields */}
-      <div className="grid grid-cols-1 gap-2.5">
+      {/* Form Fields: 2-column responsive grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         {FORM_FIELDS.map((field) => (
-          <div key={field.key} className="flex flex-col gap-1">
+          <div
+            key={field.key}
+            className={`flex flex-col gap-1 ${field.key === 'extraDetails' ? 'sm:col-span-2' : ''}`}
+          >
             <label className="text-xs font-medium text-slate-400">{field.label}</label>
             <input
               type="text"
