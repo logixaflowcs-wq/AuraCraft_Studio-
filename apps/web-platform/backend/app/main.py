@@ -302,6 +302,8 @@ async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
     if not token:
         return False
+
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -317,6 +319,38 @@ async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
     except Exception as exc:
         print(f"[Telegram Webhook Error] Delivery failed: {exc}")
         return False
+
+
+@app.on_event("startup")
+async def register_telegram_commands_on_startup():
+    """Register Topic #215 commands into Telegram's Bot menu using setMyCommands."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip() or TELEGRAM_GROUP_CHAT_ID
+    if not token:
+        return
+    commands = [
+        {"command": "start", "description": "Connect to AuraCraft Studio (Topic 215)"},
+        {"command": "help", "description": "Show available studio commands"},
+        {"command": "status", "description": "Check 3D engine & Edge-TTS status"},
+        {"command": "characters", "description": "View Anime, Army & Myanmar archetypes"},
+        {"command": "speak", "description": "Synthesize voice speech: /speak <text>"},
+        {"command": "voice", "description": "Preview actor voice: /voice <char_id> <text>"},
+        {"command": "render", "description": "Generate multi-scene video plan: /render <script>"},
+        {"command": "export", "description": "Export persona pack: /export <char_id>"},
+    ]
+    payload: Dict[str, Any] = {"commands": commands}
+    if chat_id:
+        try:
+            payload["scope"] = {"type": "chat", "chat_id": int(chat_id)}
+        except ValueError:
+            pass
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"https://api.telegram.org/bot{token}/setMyCommands", json=payload)
+            if resp.status_code == 200:
+                print("[Telegram Startup] Successfully registered AuraCraft bot commands via setMyCommands")
+    except Exception as exc:
+        print(f"[Telegram Startup] Note: Command registration skipped ({exc})")
 
 
 def _allowed_telegram_user_ids() -> set[str]:
@@ -371,6 +405,7 @@ async def telegram_webhook(
             "/characters — View Anime, Army & Myanmar archetypes\n"
             "/speak <text> — Synthesize voice audio with current actor\n"
             "/voice <char_id> <text> — Prepare a selected actor voice preview\n"
+            "/render <script> — Generate a multi-scene video render plan\n"
             "/export <char_id> — Prepare a standalone JSON persona pack\n"
         )
     elif command == "/status":
@@ -403,6 +438,23 @@ async def telegram_webhook(
                 extra["character_id"] = character_id
                 extra["voice_id"] = character["voice_id"]
                 reply_text = f"🎙️ <b>{character['name']}</b>\nVoice: <code>{character['voice_id']}</code>\nText: {speak_text.strip()[:100]}"
+    elif command == "/render":
+        action_type = "render"
+        render_script = text.partition(" ")[2].strip()
+        if not render_script:
+            reply_text = "🎬 <b>Usage:</b> /render <script text>\nExample: <code>/render အစီအစဉ်သစ် စတင်ပါပြီခင်ဗျာ</code>"
+        else:
+            scene_count = max(1, len([s for s in render_script.split("\n") if s.strip()]))
+            duration = scene_count * 6
+            reply_text = (
+                f"🎬 <b>AuraCraft Video Render Plan Generated!</b>\n\n"
+                f"📝 Script Preview: <i>\"{html.escape(render_script[:120])}\"</i>\n"
+                f"🎞️ Total Scenes: <b>{scene_count}</b>\n"
+                f"⏱️ Estimated Duration: <b>~{duration}s</b>\n"
+                f"📐 Aspect Ratio: <b>9:16 Vertical (Shorts/Reels)</b>\n"
+                f"🎭 Actor: <b>Sakura Hoshino (3D Anime)</b>\n\n"
+                f"🎨 <i>Open AuraCraft Video Studio or Narrativ Forge to export full video.</i>"
+            )
     elif command == "/export":
         action_type = "export"
         char_id = text.partition(" ")[2].strip()
