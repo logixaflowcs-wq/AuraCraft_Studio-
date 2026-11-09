@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Clapperboard, Video, Plus, Trash2, Download, Check, Sparkles, Smartphone, Monitor, Clock, Play } from 'lucide-react';
+import { Clapperboard, Video, Plus, Trash2, Download, Check, Sparkles, Smartphone, Monitor, Clock, Play, Loader2 } from 'lucide-react';
+import { API_ENDPOINTS } from '../config/api';
 
 export const VideoStudioPage: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<'9:16' | '16:9'>('9:16');
   const [characterName, setCharacterName] = useState('Shinji Kazama (シンジ)');
   const [voiceId, setVoiceId] = useState('my-MM-NilarNeural');
   const [durationPerScene, setDurationPerScene] = useState(6);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [scenes, setScenes] = useState<Array<{ id: number; title: string; script: string; emotion: string; camera: string }>>([
     {
       id: 1,
@@ -58,8 +60,9 @@ export const VideoStudioPage: React.FC = () => {
 
   const totalEstimatedSeconds = scenes.length * durationPerScene;
 
-  const handleGenerateManifest = () => {
-    const manifest = {
+  const handleGenerateManifest = async () => {
+    setIsGeneratingPlan(true);
+    const localManifest = {
       project: 'AuraCraft Studio - Video Render Plan',
       version: '1.0.0',
       aspect_ratio: aspectRatio,
@@ -78,7 +81,29 @@ export const VideoStudioPage: React.FC = () => {
       target_destinations: ['Narrativ Forge Manga Studio', 'OBS Stream Video Player'],
     };
 
-    setGeneratedPlan(manifest);
+    try {
+      const scriptText = scenes.map((s) => s.script).join('\n');
+      const res = await fetch(API_ENDPOINTS.renderPlan, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          character_id: 'char_anime_shinji',
+          script: scriptText,
+          aspect_ratio: aspectRatio,
+          seconds_per_scene: durationPerScene,
+        }),
+      });
+      if (res.ok) {
+        const plan = await res.json();
+        setGeneratedPlan({ ...localManifest, server_plan: plan });
+      } else {
+        setGeneratedPlan(localManifest);
+      }
+    } catch {
+      setGeneratedPlan(localManifest);
+    } finally {
+      setIsGeneratingPlan(false);
+    }
   };
 
   const handleDownloadManifest = () => {
@@ -261,9 +286,17 @@ export const VideoStudioPage: React.FC = () => {
             <div className="pt-3 border-t border-[#1f293d] flex gap-2">
               <button
                 onClick={handleGenerateManifest}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-purple-600/25 transition-all text-center"
+                disabled={isGeneratingPlan}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-purple-600/25 transition-all text-center flex items-center justify-center gap-1.5"
               >
-                Generate Plan Manifest
+                {isGeneratingPlan ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Creating Plan...</span>
+                  </>
+                ) : (
+                  <span>Generate Plan Manifest</span>
+                )}
               </button>
             </div>
           </div>

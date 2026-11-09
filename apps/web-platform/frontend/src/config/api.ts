@@ -6,8 +6,10 @@ export const API_BASE_URL =
 
 export const API_ENDPOINTS = {
   tts:         `${API_BASE_URL}/api/tts/synthesize`,
-  voices:      `${API_BASE_URL}/api/voices`,
+  voices:      `${API_BASE_URL}/api/tts/voices`,          // Fixed: was /api/voices
   health:      `${API_BASE_URL}/health`,
   characters:  `${API_BASE_URL}/api/characters`,
-  renderPlan:  `${API_BASE_URL}/api/render-plan`,
+  renderPlan:  `${API_BASE_URL}/api/avatar-video/render-plan`, // Fixed: was /api/render-plan
+  archetypes:  `${API_BASE_URL}/api/characters/archetypes`,
+  telegram:    `${API_BASE_URL}/api/telegram/webhook`,
 } as const;

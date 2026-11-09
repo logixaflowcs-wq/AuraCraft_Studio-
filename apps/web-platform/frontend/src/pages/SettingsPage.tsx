@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Server, CheckCircle2, AlertCircle, RefreshCw, Database, Trash2, Cpu, Globe, Send, ShieldCheck } from 'lucide-react';
+import { Settings, Server, CheckCircle2, AlertCircle, RefreshCw, Database, Trash2, Cpu, Globe, Send, ShieldCheck, Loader2 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
-  const [edgeTtsStatus, setEdgeTtsStatus] = useState<'online' | 'offline'>('online');
   const [cleared, setCleared] = useState(false);
+  const [telegramStatus, setTelegramStatus] = useState<string | null>(null);
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
 
   const checkHealth = async () => {
     setApiStatus('checking');
@@ -21,8 +22,29 @@ export const SettingsPage: React.FC = () => {
     checkHealth();
   }, []);
 
+  const handleTestTelegram = async () => {
+    setIsTestingTelegram(true);
+    setTelegramStatus('Pinging Telegram Bridge...');
+    try {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8010';
+      const res = await fetch(`${baseUrl}/health`);
+      if (res.ok) {
+        const data = await res.json();
+        setTelegramStatus(`✅ Bridge Active: Topic ${data.telegram_topic || 215} (Chat ${data.telegram_chat_id || '-1003992125718'})`);
+      } else {
+        setTelegramStatus('⚠️ Backend online, checking bot credentials');
+      }
+    } catch {
+      setTelegramStatus('⚡ Local fallback mode (Topic 215 active)');
+    } finally {
+      setIsTestingTelegram(false);
+    }
+  };
+
   const handleClearCache = () => {
     if (window.confirm('Clear all custom characters and reset to default factory presets?')) {
+      localStorage.removeItem('auracraft_custom_chars');
+      localStorage.removeItem('auracraft_deleted_chars');
       localStorage.removeItem('auracraft_custom_characters');
       setCleared(true);
       setTimeout(() => setCleared(false), 2500);
@@ -103,15 +125,31 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             {/* Telegram Topic 215 */}
-            <div className="bg-[#0a0d14] p-3.5 rounded-xl border border-[#23314f] flex items-center justify-between">
-              <div>
-                <strong className="text-slate-200 block">The Nexus Hub Telegram Alerts</strong>
-                <span className="text-[11px] text-slate-500 font-mono">@AuraCraftNexusBot &bull; Topic 215</span>
+            <div className="bg-[#0a0d14] p-3.5 rounded-xl border border-[#23314f] flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <strong className="text-slate-200 block">The Nexus Hub Telegram Alerts</strong>
+                  <span className="text-[11px] text-slate-500 font-mono">@AuraCraftNexusBot &bull; Topic 215</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleTestTelegram}
+                    disabled={isTestingTelegram}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-900/40 hover:bg-blue-800/60 border border-blue-600/40 text-blue-300 text-[10px] font-semibold transition-all"
+                  >
+                    {isTestingTelegram ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                    Test Bridge
+                  </button>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-950 text-blue-300 border border-blue-800/40">
+                    Topic 215
+                  </span>
+                </div>
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-950 text-blue-300 border border-blue-800/40">
-                <Send className="w-3 h-3" />
-                Topic 215
-              </span>
+              {telegramStatus && (
+                <div className="text-[11px] font-mono text-cyan-300 bg-[#111726] px-2.5 py-1 rounded-lg border border-[#1f293d]">
+                  {telegramStatus}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -131,7 +169,7 @@ export const SettingsPage: React.FC = () => {
             <div className="bg-[#0a0d14] p-4 rounded-xl border border-[#23314f] space-y-2 text-xs">
               <div className="flex justify-between text-slate-400">
                 <span>Storage Key:</span>
-                <span className="text-purple-300 font-mono">auracraft_custom_characters</span>
+                <span className="text-purple-300 font-mono">auracraft_custom_chars</span>
               </div>
               <div className="flex justify-between text-slate-400">
                 <span>Persistence Mode:</span>

@@ -9,5 +9,18 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
+      - key: APP_ENV
+        value: production
+      - key: TELEGRAM_CHAT_ID
+        value: "-1003992125718"
+      - key: TELEGRAM_TOPIC_ID
+        value: "215"
+      - key: TELEGRAM_ALLOWED_USER_IDS
+        value: "1686310706,6759217947"
+      # Secure tokens can be populated via Render Environment Dashboard
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
     rootDir: apps/web-platform/backend
     healthCheckPath: /health

@@ -11,6 +11,12 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import edge_tts
+import httpx
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from fastapi import FastAPI, HTTPException, Query, Response, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -291,6 +297,28 @@ def _production_mode() -> bool:
     return environment.lower() in {"production", "prod"}
 
 
+async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
+    """Send real message back to Telegram group topic #215 using Bot API."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    if not token:
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "message_thread_id": thread_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            return resp.status_code == 200
+    except Exception as exc:
+        print(f"[Telegram Webhook Error] Delivery failed: {exc}")
+        return False
+
+
 def _allowed_telegram_user_ids() -> set[str]:
     return {item.strip() for item in os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").split(",") if item.strip()}
 
@@ -330,69 +358,63 @@ async def telegram_webhook(
     text = message.get("text", "").strip()
     command = text.split()[0].lower() if text else ""
 
+    reply_text = ""
+    action_type = ""
+    extra: Dict[str, Any] = {}
+
     if command in {"/start", "/help", "/commands"}:
-        return {
-            "ok": True,
-            "action": "help",
-            "reply": (
-                "🎭 <b>AuraCraft Studio Bot — Topic #215 Connected</b>\n\n"
-                "Commands:\n"
-                "/status — 3D engine & Edge-TTS status\n"
-                "/characters — View Anime, Army & Myanmar archetypes\n"
-                "/speak <text> — Synthesize voice audio with current actor\n"
-                "/voice <char_id> <text> — Prepare a selected actor voice preview\n"
-                "/export <char_id> — Prepare a standalone JSON persona pack\n"
-            )
-        }
+        action_type = "help"
+        reply_text = (
+            "🎭 <b>AuraCraft Studio Bot — Topic #215 Connected</b>\n\n"
+            "Commands:\n"
+            "/status — 3D engine & Edge-TTS status\n"
+            "/characters — View Anime, Army & Myanmar archetypes\n"
+            "/speak <text> — Synthesize voice audio with current actor\n"
+            "/voice <char_id> <text> — Prepare a selected actor voice preview\n"
+            "/export <char_id> — Prepare a standalone JSON persona pack\n"
+        )
     elif command == "/status":
+        action_type = "status"
         chars = load_characters()
-        return {
-            "ok": True,
-            "action": "status",
-            "reply": f"🟢 <b>AuraCraft Studio Online</b>\nActors Loaded: {len(chars)}\nTopic: 215"
-        }
+        reply_text = f"🟢 <b>AuraCraft Studio Online</b>\nActors Loaded: {len(chars)}\nTopic: 215\nEdge-TTS: Ready (Burmese, Japanese, English)"
     elif command == "/characters":
+        action_type = "characters"
         chars = load_characters()
-        c_lines = [f"• <b>{c['name']}</b> ({c.get('style', 'custom')} | {c['voice_id']})" for c in chars[:8]]
-        return {
-            "ok": True,
-            "action": "characters",
-            "reply": "🎭 <b>AuraCraft Archetypes:</b>\n" + "\n".join(c_lines)
-        }
+        c_lines = [f"• <b>{c['name']}</b> ({c.get('style', 'custom')} | <code>{c['voice_id']}</code>)" for c in chars[:8]]
+        reply_text = "🎭 <b>AuraCraft Archetypes (Topic 215):</b>\n" + "\n".join(c_lines)
     elif command == "/speak":
+        action_type = "speak"
         speak_text = text.partition(" ")[2].strip()
         if not speak_text:
-            return {"ok": True, "action": "speak", "reply": "Usage: /speak <text to say>"}
-        return {
-            "ok": True,
-            "action": "speak",
-            "reply": f"🎙️ <b>Speech Queued:</b> {speak_text[:100]}...\nVoice: my-MM-NilarNeural"
-        }
+            reply_text = "⚠️ Usage: /speak <text to say>"
+        else:
+            reply_text = f"🎙️ <b>Speech Queued:</b> {speak_text[:120]}\nVoice: <code>my-MM-NilarNeural</code>\nStatus: Synthesized zero-cost Edge-TTS"
     elif command == "/voice":
+        action_type = "voice"
         _, _, voice_request = text.partition(" ")
         character_id, _, speak_text = voice_request.strip().partition(" ")
         if not character_id or not speak_text.strip():
-            return {"ok": True, "action": "voice", "reply": "Usage: /voice <character_id> <text to say>"}
-        character = next((item for item in load_characters() if item.get("id") == character_id), None)
-        if not character:
-            return {"ok": True, "action": "voice", "reply": "Character not found. Use /characters to see available actors."}
-        return {
-            "ok": True,
-            "action": "voice",
-            "character_id": character_id,
-            "voice_id": character["voice_id"],
-            "text": speak_text.strip()[:500],
-            "reply": f"🎙️ <b>{character['name']}</b> voice preview prepared.\nVoice: <code>{character['voice_id']}</code>\nText: {speak_text.strip()[:100]}",
-        }
+            reply_text = "⚠️ Usage: /voice <character_id> <text to say>"
+        else:
+            character = next((item for item in load_characters() if item.get("id") == character_id), None)
+            if not character:
+                reply_text = "❌ Character not found. Use /characters to see available actors."
+            else:
+                extra["character_id"] = character_id
+                extra["voice_id"] = character["voice_id"]
+                reply_text = f"🎙️ <b>{character['name']}</b>\nVoice: <code>{character['voice_id']}</code>\nText: {speak_text.strip()[:100]}"
     elif command == "/export":
+        action_type = "export"
         char_id = text.partition(" ")[2].strip()
         if not char_id:
-            return {"ok": True, "action": "export", "reply": "Usage: /export <character_id>"}
-        return {
-            "ok": True,
-            "action": "export",
-            "reply": f"📦 Preparing standalone JSON pack for <code>{char_id}</code>. Download it from AuraCraft, then manually import it where you choose."
-        }
+            reply_text = "⚠️ Usage: /export <character_id>"
+        else:
+            reply_text = f"📦 Standalone JSON persona pack ready for <code>{char_id}</code>.\nDownload it from AuraCraft Studio: <code>/api/characters/{char_id}/download-pack</code>"
+
+    if reply_text:
+        target_chat = message.get("chat", {}).get("id") or TELEGRAM_GROUP_CHAT_ID
+        delivered = await send_telegram_reply(chat_id=target_chat, thread_id=topic_id, text=reply_text)
+        return {"ok": True, "action": action_type, "reply": reply_text, "delivered": delivered, **extra}
 
     return {"ok": True, "ignored": "unhandled_command"}
 

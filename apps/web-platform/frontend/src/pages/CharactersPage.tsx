@@ -192,9 +192,10 @@ export const CharactersPage: React.FC<CharactersPageProps> = ({
   ];
 
   // Load characters with custom from localStorage
+  // Key: auracraft_custom_chars (synced with App.tsx / StudioLeftPanel.tsx)
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('auracraft_custom_characters');
+      const stored = localStorage.getItem('auracraft_custom_chars');
       if (stored) {
         const custom = JSON.parse(stored);
         setCharacters([...DEFAULT_PRESETS, ...custom]);
@@ -224,10 +225,10 @@ export const CharactersPage: React.FC<CharactersPageProps> = ({
       personality: newPersonality.trim() || `${newName} - Custom configured character`,
     };
 
-    const stored = localStorage.getItem('auracraft_custom_characters');
+    const stored = localStorage.getItem('auracraft_custom_chars');
     const existingCustom = stored ? JSON.parse(stored) : [];
     const updatedCustom = [newChar, ...existingCustom];
-    localStorage.setItem('auracraft_custom_characters', JSON.stringify(updatedCustom));
+    localStorage.setItem('auracraft_custom_chars', JSON.stringify(updatedCustom));
 
     setCharacters([...DEFAULT_PRESETS, ...updatedCustom]);
     setShowAddModal(false);
@@ -237,11 +238,11 @@ export const CharactersPage: React.FC<CharactersPageProps> = ({
   };
 
   const handleDeleteCharacter = (id: string) => {
-    const stored = localStorage.getItem('auracraft_custom_characters');
+    const stored = localStorage.getItem('auracraft_custom_chars');
     if (stored) {
       const existingCustom = JSON.parse(stored);
       const updated = existingCustom.filter((c: any) => c.id !== id);
-      localStorage.setItem('auracraft_custom_characters', JSON.stringify(updated));
+      localStorage.setItem('auracraft_custom_chars', JSON.stringify(updated));
       setCharacters([...DEFAULT_PRESETS, ...updated]);
     }
   };
