@@ -91,8 +91,8 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
         }
       }}
     >
-      {/* ── Thumbnail ── */}
-      <div className="relative w-full aspect-square bg-[#111827] overflow-hidden">
+      {/* ── Thumbnail (4:5 Portrait Ratio for 3D/Anime Character Busts) ── */}
+      <div className="relative w-full aspect-[4/5] bg-gradient-to-b from-[#111827] to-[#0a0d14] overflow-hidden">
         {thumbnailUrl ? (
           <img
             src={thumbnailUrl}
@@ -162,37 +162,43 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
         </div>
       </div>
 
-      {/* ── Info ── */}
-      <div className="p-3 flex flex-col gap-1.5">
-        <p className="text-sm font-semibold text-slate-100 truncate">{character.name}</p>
-
-        <div className="flex items-center justify-between">
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${styleColor}`}>
+      {/* ── Info & Metadata ── */}
+      <div className="p-3 flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-1.5">
+          <p className="text-sm font-semibold text-slate-100 truncate flex-1" title={character.name}>
+            {character.name}
+          </p>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${styleColor}`}>
             {styleLabel}
           </span>
-          {character.tags.length > 0 && (
-            <span className="text-[10px] text-slate-500 truncate max-w-[100px]">
-              #{character.tags[0]}
-              {character.tags.length > 1 ? ` +${character.tags.length - 1}` : ''}
-            </span>
-          )}
         </div>
 
+        {character.tags.length > 0 && (
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 overflow-hidden">
+            <span className="truncate bg-slate-800/60 px-1.5 py-0.5 rounded border border-slate-700/50">
+              #{character.tags[0]}
+            </span>
+            {character.tags.length > 1 && (
+              <span className="text-slate-500 shrink-0">+{character.tags.length - 1}</span>
+            )}
+          </div>
+        )}
+
         {/* Mobile-friendly quick action buttons (visible on mobile / touch viewports) */}
-        <div className="flex md:hidden items-center justify-between pt-1 border-t border-[#1f293d]/50 mt-1">
+        <div className="flex md:hidden items-center justify-between pt-1.5 border-t border-[#1f293d]/60 mt-0.5">
           <button
             onClick={(e) => { e.stopPropagation(); onToggleFavorite(character); }}
-            className={`p-1 rounded-md text-xs flex items-center gap-1 ${
+            className={`p-1.5 rounded-md text-xs flex items-center gap-1 ${
               character.isFavorite ? 'text-amber-400' : 'text-slate-400 hover:text-amber-300'
             }`}
             aria-label="Favorite"
           >
             <Heart className={`w-3.5 h-3.5 ${character.isFavorite ? 'fill-current' : ''}`} />
           </button>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={(e) => { e.stopPropagation(); onExport(character); }}
-              className="p-1 rounded-md text-slate-400 hover:text-indigo-300"
+              className="p-1.5 rounded-md text-slate-400 hover:text-indigo-300"
               title="Export"
               aria-label="Export"
             >
@@ -200,7 +206,7 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
             </button>
             <button
               onClick={handleDeleteClick}
-              className="p-1 rounded-md text-slate-400 hover:text-rose-400"
+              className="p-1.5 rounded-md text-slate-400 hover:text-rose-400"
               title="Delete"
               aria-label="Delete"
             >
