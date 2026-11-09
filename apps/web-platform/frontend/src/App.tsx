@@ -17,8 +17,9 @@ import { PhotoAvatarPage } from './pages/PhotoAvatarPage';
 import { ImageToCharPage } from './pages/ImageToCharPage';
 import { 
   Radio, Sparkles, Layers, Volume2, Clapperboard, Tv, Settings, 
-  UserCheck, ShieldCheck, ExternalLink, RefreshCw, Camera, Wand2, Globe
+  UserCheck, ShieldCheck, ExternalLink, RefreshCw, Camera, Wand2, Globe, Mic, MicOff
 } from 'lucide-react';
+import { lipSync } from './audio/lipSyncAnalyzer';
 import { translations, type Language } from './utils/i18n';
 
 type NavTab = 'studio' | 'characters' | 'voices' | 'video' | 'broadcast' | 'photo' | 'img2char' | 'settings';
@@ -39,6 +40,25 @@ export default function App() {
   const [bgMode, setBgMode] = useState<'cyber' | 'greenscreen' | 'transparent'>('cyber');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isOBSMode, setIsOBSMode] = useState(false);
+  const [isMicActive, setIsMicActive] = useState(false);
+
+  const toggleMic = async () => {
+    if (isMicActive) {
+      lipSync.stopMic();
+      setIsMicActive(false);
+    } else {
+      const ok = await lipSync.initMic();
+      if (ok) {
+        setIsMicActive(true);
+      }
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      lipSync.stopMic();
+    };
+  }, []);
 
   // Custom Characters and Deleted Preset Character Tracking
   const [customCharacters, setCustomCharacters] = useState<StudioCharacter[]>(() => {
@@ -319,6 +339,20 @@ export default function App() {
           >
             <Globe className="w-3.5 h-3.5 text-cyan-400" />
             <span>{lang === 'en' ? '🇬🇧 EN' : '🇲🇲 MM'}</span>
+          </button>
+
+          {/* Real-time Microphone Input for Live Streamers & VTubers */}
+          <button
+            onClick={toggleMic}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold transition-all shadow-sm ${
+              isMicActive
+                ? 'bg-rose-600/30 border border-rose-500 text-rose-300 animate-pulse shadow-[0_0_12px_rgba(244,63,94,0.3)]'
+                : 'bg-[#111726] hover:bg-[#1c263d] border border-[#23314f] text-slate-300 hover:text-white'
+            }`}
+            title={isMicActive ? t.micActive : t.liveMic}
+          >
+            {isMicActive ? <Mic className="w-3.5 h-3.5 text-rose-400" /> : <MicOff className="w-3.5 h-3.5 text-slate-400" />}
+            <span>{isMicActive ? (lang === 'en' ? 'Mic Active' : 'မိုက် ဖွင့်ထား') : (lang === 'en' ? 'Live Mic' : 'မိုက်ဖွင့်')}</span>
           </button>
 
           {isSpeaking && (

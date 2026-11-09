@@ -59,27 +59,23 @@ AuraCraft_Studio-/
 ├── .env.production.example  # Public environment template
 ├── .gitignore               # Comprehensive exclusion rules
 ├── package.json             # Root monorepo workspace & launcher scripts
+├── render.yaml              # Render blueprint for FastAPI backend & static frontend
 ├── README.md                # Project architecture & documentation
-├── cloudflare_worker/       # Zero-cost Telegram Edge Webhook
-│   ├── index.js             # Topic 215 scoped webhook router
-│   ├── wrangler.toml        # Cloudflare configuration
-│   └── README.md            # Cloudflare deployment guide
 └── apps/
-    ├── web-studio/          # React 19 / Vite / Three.js 3D Viewport & Studio UI
-    │   ├── public/
-    │   │   ├── logo.svg     # AuraCraft pure vector SVG brand emblem
-    │   │   └── models/      # Bundled VRM sample avatar models
-    │   └── src/
-    │       ├── components/  # AuraCraftLogo, AudioVisualizer, Viewport, Controls
-    │       └── vrm/         # VRM loader, blendshape controllers, audio FFT
-    └── backend-service/     # FastAPI Python service & Edge-TTS engine
-        ├── app/
-        │   └── main.py      # FastAPI endpoints, Telegram webhook & Narrativ bridge
-        ├── data/
-        │   └── characters.json # Curated archetypes database
-        └── tests/
-            ├── test_character_archetypes.py # Archetype test suite
-            └── test_telegram_topic_215.py   # Topic 215 security contract tests
+    └── web-platform/
+        ├── frontend/        # React 19 / Vite / Three.js 3D Viewport & Studio UI
+        │   ├── public/
+        │   │   ├── avatars/ # Curated photo character portraits
+        │   │   └── models/  # Bundled VRM 3D humanoid avatar models
+        │   └── src/
+        │       ├── audio/   # Web Audio API real-time FFT lip-sync analyzer
+        │       ├── components/ # Viewport3D, LivePhotoStage, VoiceSelector, Controls
+        │       └── pages/   # VideoStudio, Broadcast, Characters, Settings
+        └── backend/         # FastAPI Python service & Edge-TTS engine
+            ├── app/
+            │   └── main.py  # FastAPI endpoints, Telegram webhook & Narrativ bridge
+            ├── cloudflare_worker/ # Zero-cost Telegram Edge Webhook (wrangler.toml)
+            └── tests/       # Test suite for archetypes and Topic 215
 ```
 
 ---

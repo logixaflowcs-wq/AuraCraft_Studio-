@@ -16,6 +16,8 @@ export class LipSyncAnalyzer {
   private analyser: AnalyserNode | null = null;
   private dataArray: Uint8Array | null = null;
   private isRunning: boolean = false;
+  private micStream: MediaStream | null = null;
+  private micSource: MediaStreamAudioSourceNode | null = null;
 
   public init(audioElement?: HTMLAudioElement): void {
     if (this.audioCtx) return;
@@ -93,7 +95,46 @@ export class LipSyncAnalyzer {
     }
   }
 
+  public async initMic(): Promise<boolean> {
+    try {
+      if (!this.audioCtx) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        this.audioCtx = new AudioContextClass();
+      }
+      if (!this.analyser) {
+        this.analyser = this.audioCtx.createAnalyser();
+        this.analyser.fftSize = 512;
+        this.analyser.smoothingTimeConstant = 0.5;
+        this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+      }
+      if (this.audioCtx.state === 'suspended') {
+        await this.audioCtx.resume();
+      }
+      this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.micSource = this.audioCtx.createMediaStreamSource(this.micStream);
+      this.micSource.connect(this.analyser);
+      // NOTE: Do NOT connect micSource to destination to prevent feedback loop
+      this.isRunning = true;
+      return true;
+    } catch (err) {
+      console.warn('[LipSync] Failed to initialize microphone input:', err);
+      return false;
+    }
+  }
+
+  public stopMic(): void {
+    if (this.micSource) {
+      this.micSource.disconnect();
+      this.micSource = null;
+    }
+    if (this.micStream) {
+      this.micStream.getTracks().forEach((track) => track.stop());
+      this.micStream = null;
+    }
+  }
+
   public dispose(): void {
+    this.stopMic();
     this.isRunning = false;
     if (this.audioCtx) {
       this.audioCtx.close();

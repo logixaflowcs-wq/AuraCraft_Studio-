@@ -118,6 +118,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   // Active VRM Avatar
   const currentVrmRef = useRef<VRM | null>(null);
+  const mouseTargetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [avatarMode, setAvatarMode] = useState<'vrm' | 'procedural'>('vrm');
   const [modelLoading, setModelLoading] = useState(false);
   const [modelName, setModelName] = useState<string>(currentModelName);
@@ -730,6 +731,19 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
     // 8. Animation Engine
     let animationFrameId: number;
     const clock = new THREE.Clock();
+    const currentMouse = { x: 0, y: 0 };
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      mouseTargetRef.current = {
+        x: Math.max(-1, Math.min(1, nx)),
+        y: Math.max(-1, Math.min(1, ny)),
+      };
+    };
+    container.addEventListener('pointermove', handlePointerMove);
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
@@ -745,6 +759,10 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
       const breath = Math.sin(time * 1.8) * 0.005;
       const headSway = Math.sin(time * 0.7) * 0.025;
 
+      // Dynamic Interactive Mouse Pointer Tracking
+      currentMouse.x += (mouseTargetRef.current.x - currentMouse.x) * 0.05;
+      currentMouse.y += (mouseTargetRef.current.y - currentMouse.y) * 0.05;
+
       const vrm = currentVrmRef.current;
       const visemes = lipSync.getVisemes();
 
@@ -755,14 +773,17 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
         const spineNode = vrm.humanoid?.getNormalizedBoneNode('spine');
 
         if (spineNode) {
-          spineNode.rotation.x = breath * 0.5;
+          spineNode.rotation.x = breath * 0.5 - currentMouse.y * 0.03;
+          spineNode.rotation.y = currentMouse.x * 0.06;
         }
         if (neckNode) {
-          neckNode.rotation.y = headSway * 0.4;
+          neckNode.rotation.y = headSway * 0.4 + currentMouse.x * 0.16;
+          neckNode.rotation.x = -currentMouse.y * 0.10;
         }
         if (headNode) {
-          headNode.rotation.y = headSway * 0.6;
-          headNode.rotation.z = Math.cos(time * 0.5) * 0.012;
+          headNode.rotation.y = headSway * 0.6 + currentMouse.x * 0.26;
+          headNode.rotation.x = -currentMouse.y * 0.18;
+          headNode.rotation.z = Math.cos(time * 0.5) * 0.012 - currentMouse.x * 0.04;
         }
 
         // Natural Human Blinking Engine via VRM Expressions
@@ -837,6 +858,7 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      container.removeEventListener('pointermove', handlePointerMove);
       controls.dispose();
       renderer.dispose();
       if (currentVrmRef.current) {

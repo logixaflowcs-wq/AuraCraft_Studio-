@@ -55,6 +55,10 @@ export const translations = {
     emotion: 'Emotion',
     speaking: 'Speaking (Lip-Sync)',
     online: 'Port 5180 Live',
+    liveMic: 'Live Mic Input',
+    micActive: 'Mic Active (Live Lip-Sync)',
+    voiceRate: 'Speech Speed',
+    voicePitch: 'Voice Pitch',
 
     // Delete & Reset
     delete: 'Delete',
@@ -120,6 +124,10 @@ export const translations = {
     emotion: 'ခံစားချက်',
     speaking: 'အသံပြောနေသည်',
     online: 'Port 5180 အသင့်',
+    liveMic: 'မိုက်ခရိုဖုန်း တိုက်ရိုက်ပြောရန်',
+    micActive: 'မိုက် ဖွင့်ထားသည် (အသံအတိုင်း ပါးစပ်လှုပ်မည်)',
+    voiceRate: 'အပြော အမြန်နှုန်း',
+    voicePitch: 'အသံ အနိမ့်အမြင့်',
 
     // Delete & Reset
     delete: 'ဖျက်မည်',
