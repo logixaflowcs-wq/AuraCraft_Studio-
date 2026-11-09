@@ -102,9 +102,16 @@ The Worker sends generated audio and JSON packs as Telegram attachments. It does
 
 ## Deployment notes and limitations
 
-- Frontend production API default: https://auracraft-backend.onrender.com. Override with VITE_API_URL if the backend has a different domain.
-- The Render blueprint allows the Netlify origin shown in render.yaml. Update CORS_ORIGINS to your exact deployed frontend origin if it changes.
-- Cloudflare secrets and Telegram webhook registration must be configured in the Cloudflare account; a GitHub change alone cannot provision those credentials.
+Current free-tier deployment (branch `fix/production-integration-hardening`):
+
+- Frontend: https://auracraft-studio.onrender.com
+- Backend: https://auracraft-backend-dt1u.onrender.com
+- Cloudflare Worker: https://auracraft-studio-telegram-worker.auracraftstudio.workers.dev
+- Frontend `VITE_API_URL` and backend `CORS_ORIGINS` are configured for these origins in Render.
+- Cloudflare Worker variables include `BACKEND_API_URL`, `FRONTEND_BASE_URL`, the Telegram group chat ID and topic ID. The Worker is deployed, but Telegram commands remain disabled until the three secret bindings `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `TELEGRAM_ALLOWED_USER_IDS` are added in Cloudflare and the webhook is registered.
+- GitHub Actions CI completed successfully for the deployment commit. Render's first backend deployment is live; its environment-update redeploy is still being finalized.
+- All currently provisioned Render services use the Free plan. No paid resources or databases were created.
+- The free Render filesystem is ephemeral; character edits and generated plans can be lost on restart or redeploy. Durable server-side persistence needs a database or persistent disk, which has deliberately not been provisioned.
 - Video Studio currently produces a JSON plan only. Actual video rendering requires a separately selected render engine/provider.
 - OBS browser overlay and live broadcast output must be tested against the actual browser, capture device and streaming setup before production use.
 - Edge-TTS availability in the health response indicates the backend package is installed; it does not guarantee the upstream speech service is reachable at every moment.
