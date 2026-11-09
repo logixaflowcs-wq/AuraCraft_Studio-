@@ -127,8 +127,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onPreviewCharacter }) 
   // ─────────────────────────────────────────────
   return (
     <div className="flex h-full w-full overflow-hidden bg-[#0a0d14]">
-      {/* ── LEFT SIDEBAR: Filter Navigation ── */}
-      <aside className="w-52 flex-shrink-0 border-r border-[#1f293d] bg-[#0c101c]/90 flex flex-col p-3 gap-1 overflow-y-auto">
+      {/* ── LEFT SIDEBAR: Filter Navigation (Desktop) ── */}
+      <aside className="hidden md:flex w-52 flex-shrink-0 border-r border-[#1f293d] bg-[#0c101c]/90 flex-col p-3 gap-1 overflow-y-auto">
         <div className="flex items-center gap-2 px-2 pt-1 pb-3">
           <FolderOpen className="w-4 h-4 text-indigo-400" />
           <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Library</span>
@@ -160,7 +160,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onPreviewCharacter }) 
           </button>
         ))}
 
-        {/* Import drop zone in sidebar */}
+        {/* Import button in desktop sidebar */}
         <div className="mt-auto pt-4">
           <button
             onClick={() => setShowImport(!showImport)}
@@ -179,8 +179,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onPreviewCharacter }) 
 
       {/* ── MAIN CONTENT AREA ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top bar: Search + Refresh */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#1f293d] bg-[#0d121f]/80">
+        {/* Top bar: Search + Import Toggle + Refresh */}
+        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-[#1f293d] bg-[#0d121f]/80">
           <div className="flex-1">
             <SearchBar
               characters={allCharacters}
@@ -190,12 +190,46 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onPreviewCharacter }) 
             />
           </div>
           <button
+            onClick={() => setShowImport(!showImport)}
+            className={`flex md:hidden p-2 rounded-xl border transition-colors ${
+              showImport
+                ? 'bg-indigo-600 border-indigo-500 text-white'
+                : 'bg-[#111827] border-[#1f293d] text-indigo-400 hover:text-white'
+            }`}
+            title="Import character"
+            aria-label="Import character"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          <button
             onClick={loadCharacters}
             className="p-2 rounded-xl bg-[#111827] border border-[#1f293d] text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
             title="Refresh library"
+            aria-label="Refresh library"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+        </div>
+
+        {/* Mobile Horizontal Filter Pills */}
+        <div className="flex md:hidden overflow-x-auto py-2 px-3 gap-1.5 border-b border-[#1f293d]/50 bg-[#0c101c]/80 no-scrollbar">
+          {FILTER_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveFilter(item.id)}
+              className={`
+                flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
+                transition-all
+                ${activeFilter === item.id
+                  ? 'bg-indigo-600 text-white font-semibold'
+                  : 'bg-[#111827] text-slate-400 hover:text-slate-200 border border-[#1f293d]'
+                }
+              `}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
         </div>
 
         {/* Import zone (collapsible) */}

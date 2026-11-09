@@ -72,14 +72,24 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Character ${character.name}, style ${character.style}`}
       className="
         group relative flex flex-col
         bg-[#0d121f] border border-[#1f293d]
         rounded-2xl overflow-hidden cursor-pointer
         hover:border-indigo-500/60 hover:shadow-xl hover:shadow-indigo-900/20
+        focus:outline-none focus:ring-2 focus:ring-indigo-500/50
         transition-all duration-200
       "
       onClick={() => onPreview(character)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onPreview(character);
+        }
+      }}
     >
       {/* ── Thumbnail ── */}
       <div className="relative w-full aspect-square bg-[#111827] overflow-hidden">
@@ -102,10 +112,11 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
           </div>
         )}
 
-        {/* Quick Actions overlay — visible on hover */}
+        {/* Quick Actions overlay — visible on hover and focus-within */}
         <div className="
           absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent
-          opacity-0 group-hover:opacity-100 transition-opacity duration-200
+          opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100
+          transition-opacity duration-200
           flex items-end justify-end gap-1.5 p-2
         ">
           <button
@@ -116,6 +127,7 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
                 : 'bg-black/40 border-white/20 text-white/70 hover:text-amber-300 hover:bg-amber-500/20'
             }`}
             title={character.isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
+            aria-label={character.isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
           >
             <Heart className={`w-3.5 h-3.5 ${character.isFavorite ? 'fill-current' : ''}`} />
           </button>
@@ -124,6 +136,7 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
             onClick={(e) => { e.stopPropagation(); onExport(character); }}
             className="p-1.5 rounded-lg bg-black/40 border border-white/20 text-white/70 hover:text-indigo-300 hover:bg-indigo-500/20 hover:border-indigo-500/50 transition-colors"
             title="Export .aura"
+            aria-label="Export .aura package"
           >
             <Download className="w-3.5 h-3.5" />
           </button>
@@ -132,6 +145,7 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
             onClick={handleDeleteClick}
             className="p-1.5 rounded-lg bg-black/40 border border-white/20 text-white/70 hover:text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/50 transition-colors"
             title="Delete"
+            aria-label="Delete character"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -162,6 +176,37 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({
               {character.tags.length > 1 ? ` +${character.tags.length - 1}` : ''}
             </span>
           )}
+        </div>
+
+        {/* Mobile-friendly quick action buttons (visible on mobile / touch viewports) */}
+        <div className="flex md:hidden items-center justify-between pt-1 border-t border-[#1f293d]/50 mt-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleFavorite(character); }}
+            className={`p-1 rounded-md text-xs flex items-center gap-1 ${
+              character.isFavorite ? 'text-amber-400' : 'text-slate-400 hover:text-amber-300'
+            }`}
+            aria-label="Favorite"
+          >
+            <Heart className={`w-3.5 h-3.5 ${character.isFavorite ? 'fill-current' : ''}`} />
+          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onExport(character); }}
+              className="p-1 rounded-md text-slate-400 hover:text-indigo-300"
+              title="Export"
+              aria-label="Export"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleDeleteClick}
+              className="p-1 rounded-md text-slate-400 hover:text-rose-400"
+              title="Delete"
+              aria-label="Delete"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

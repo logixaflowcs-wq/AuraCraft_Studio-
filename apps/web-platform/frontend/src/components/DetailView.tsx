@@ -223,13 +223,29 @@ export const DetailView: React.FC<DetailViewProps> = ({
     controlsRef.current.update();
   }, []);
 
+  // ── Keyboard accessibility: Close on Escape key ──
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   // ─────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 z-50 flex bg-[#0a0d14]/95 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Character details for ${currentCharacter.name}`}
+      className="fixed inset-0 z-50 flex flex-col lg:flex-row bg-[#0a0d14]/95 backdrop-blur-sm overflow-y-auto lg:overflow-hidden"
+    >
       {/* ── LEFT: 3D VRM Viewport ── */}
-      <div className="flex-1 relative flex flex-col">
+      <div className="flex-1 relative flex flex-col min-h-[380px] lg:min-h-0">
         {/* Viewport header */}
         <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-2 bg-gradient-to-b from-black/60 to-transparent">
           <div className="flex items-center gap-2">
@@ -252,7 +268,8 @@ export const DetailView: React.FC<DetailViewProps> = ({
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg bg-black/40 border border-white/10 text-slate-300 hover:text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/40 transition-colors"
-              title="Close"
+              title="Close (Esc)"
+              aria-label="Close dialog"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -260,7 +277,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
         </div>
 
         {/* 3D viewport container */}
-        <div ref={viewportRef} className="flex-1 w-full" />
+        <div ref={viewportRef} className="flex-1 w-full min-h-[380px] lg:min-h-0" />
 
         {/* VRM error state */}
         {vrmError && (
@@ -287,7 +304,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
       </div>
 
       {/* ── RIGHT PANEL: Info / Prompt / Reference Sheet ── */}
-      <div className="w-96 flex-shrink-0 border-l border-[#1f293d] bg-[#0c101c] flex flex-col overflow-hidden">
+      <div className="w-full lg:w-96 flex-shrink-0 border-t lg:border-t-0 lg:border-l border-[#1f293d] bg-[#0c101c] flex flex-col overflow-hidden">
         {/* Character header */}
         <div className="px-4 py-4 border-b border-[#1f293d] flex items-center gap-3">
           {thumbnailUrl && (
