@@ -15,20 +15,31 @@ import { BroadcastPage } from './pages/BroadcastPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PhotoAvatarPage } from './pages/PhotoAvatarPage';
 import { ImageToCharPage } from './pages/ImageToCharPage';
+import { LibraryView } from './components/LibraryView';
+import { DetailView } from './components/DetailView';
+import { initDefaultSettings } from './db/database';
 import { 
   Radio, Sparkles, Layers, Volume2, Clapperboard, Tv, Settings, 
-  UserCheck, ShieldCheck, ExternalLink, RefreshCw, Camera, Wand2, Globe, Mic, MicOff
+  UserCheck, ShieldCheck, ExternalLink, RefreshCw, Camera, Wand2, Globe, Mic, MicOff,
+  Library
 } from 'lucide-react';
 import { lipSync } from './audio/lipSyncAnalyzer';
 import { translations, type Language } from './utils/i18n';
+import type { Character } from './types/character';
 
-type NavTab = 'studio' | 'characters' | 'voices' | 'video' | 'broadcast' | 'photo' | 'img2char' | 'settings';
+type NavTab = 'studio' | 'characters' | 'voices' | 'video' | 'broadcast' | 'photo' | 'img2char' | 'library' | 'settings';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('en');
   const t = translations[lang] || translations.en;
 
   const [activeTab, setActiveTab] = useState<NavTab>('studio');
+  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+
+  // Initialize Dexie DB default settings on first load
+  useEffect(() => {
+    initDefaultSettings().catch(console.error);
+  }, []);
   const [stageMode, setStageMode] = useState<'photo' | '3d'>('photo');
   const [photoAvatarUrl, setPhotoAvatarUrl] = useState<string>('/avatars/blue_hair_girl.jpg');
   const [photoAvatarName, setPhotoAvatarName] = useState<string>('Aoi (Blue Hair Kimono)');
@@ -274,14 +285,15 @@ export default function App() {
   };
 
   const navItems = [
-    { id: 'studio', label: t.studio, icon: Sparkles },
-    { id: 'characters', label: t.characters, icon: Layers },
-    { id: 'voices', label: t.voices, icon: Volume2 },
-    { id: 'video', label: t.video, icon: Clapperboard },
-    { id: 'broadcast', label: t.broadcast, icon: Tv },
-    { id: 'photo', label: t.photoAvatar, icon: Camera },
-    { id: 'img2char', label: t.img2char, icon: Wand2 },
-    { id: 'settings', label: t.settings, icon: Settings },
+    { id: 'studio',     label: t.studio,      icon: Sparkles },
+    { id: 'library',    label: 'Library',     icon: Library },
+    { id: 'characters', label: t.characters,  icon: Layers },
+    { id: 'voices',     label: t.voices,      icon: Volume2 },
+    { id: 'video',      label: t.video,       icon: Clapperboard },
+    { id: 'broadcast',  label: t.broadcast,   icon: Tv },
+    { id: 'photo',      label: t.photoAvatar, icon: Camera },
+    { id: 'img2char',   label: t.img2char,    icon: Wand2 },
+    { id: 'settings',   label: t.settings,    icon: Settings },
   ];
 
   return (
@@ -498,6 +510,13 @@ export default function App() {
           />
         )}
 
+        {/* TAB: CHARACTER ASSET LIBRARY */}
+        {activeTab === 'library' && (
+          <LibraryView
+            onPreviewCharacter={(char) => setSelectedCharacter(char)}
+          />
+        )}
+
         {/* TAB 3: VOICE LAB PAGE */}
         {activeTab === 'voices' && <VoiceLabPage />}
 
@@ -534,6 +553,15 @@ export default function App() {
         {/* TAB 8: SETTINGS PAGE */}
         {activeTab === 'settings' && <SettingsPage />}
       </main>
+
+      {/* ── CHARACTER DETAIL VIEW MODAL ── */}
+      {selectedCharacter && (
+        <DetailView
+          character={selectedCharacter}
+          onClose={() => setSelectedCharacter(null)}
+          onCharacterUpdated={(updated) => setSelectedCharacter(updated)}
+        />
+      )}
     </div>
   );
 }
