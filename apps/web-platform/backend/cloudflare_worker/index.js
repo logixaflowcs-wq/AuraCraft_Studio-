@@ -13,15 +13,19 @@ export default {
 
     // 1. Health check endpoint
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
+      const backend = env.BACKEND_API_URL ? await backendRequest(env, "/health").catch(() => null) : null;
+      const telegramConfigured = Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_WEBHOOK_SECRET && env.TELEGRAM_ALLOWED_USER_IDS);
       return new Response(
         JSON.stringify({
-          status: "healthy",
+          status: backend && backend.status === "healthy" && telegramConfigured ? "healthy" : "degraded",
           service: "AuraCraft Studio Cloudflare Edge Worker",
+          backend_status: backend ? backend.status : "unavailable",
+          telegram_configured: telegramConfigured,
           configured_topic: env.TELEGRAM_TOPIC_ID || "215",
           configured_chat: env.TELEGRAM_GROUP_CHAT_ID || "-1003992125718",
           edge_runtime: "cloudflare-workers",
         }),
-        { headers: { "Content-Type": "application/json" } }
+        { status: backend && telegramConfigured ? 200 : 503, headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -31,8 +35,8 @@ export default {
         // A. Validate a configured webhook secret.  A missing secret is a
         // configuration error, not permission to accept unauthenticated input.
         const providedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
-        if (!env.TELEGRAM_WEBHOOK_SECRET) {
-          return new Response(JSON.stringify({ error: "Webhook secret is not configured" }), {
+        if (!env.TELEGRAM_WEBHOOK_SECRET || !env.TELEGRAM_BOT_TOKEN) {
+          return new Response(JSON.stringify({ error: "Telegram bot token and webhook secret must be configured" }), {
             status: 503,
             headers: { "Content-Type": "application/json" },
           });
@@ -64,7 +68,7 @@ export default {
         }
 
         const text = (message.text || "").trim();
-        const command = text.split(/\s+/)[0].toLowerCase();
+        const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
         const chatId = message.chat.id;
         const topicId = actualTopic;
         const expectedChat = env.TELEGRAM_GROUP_CHAT_ID || "-1003992125718";
@@ -95,57 +99,78 @@ export default {
             `Commands:\n` +
             `• <code>/status</code> — 3D Persona engine & Edge-TTS status\n` +
             `• <code>/characters</code> — View Anime, Army & Myanmar archetypes\n` +
-            `• <code>/speak &lt;text&gt;</code> — Synthesize neural voice\n` +
-            `• <code>/export &lt;actor_id&gt;</code> — Sync character pack to Narrativ Forge\n\n` +
+            `• <code>/speak &lt;text&gt;</code> — Generate Nilar audio\n` +
+            `• <code>/voice &lt;actor_id&gt; &lt;text&gt;</code> — Generate actor voice\n` +
+            `• <code>/export &lt;actor_id&gt;</code> — Download standalone JSON pack\n\n` +
             `<i>Running on Cloudflare Zero-Cost Edge Worker.</i>`;
         } else if (command === "/status") {
-          replyText =
-            `🟢 <b>AuraCraft Studio Online</b>\n\n` +
-            `• <b>Engine:</b> Three.js VRM + Web Audio FFT\n` +
-            `• <b>Voice Engine:</b> Zero-Cost Microsoft Edge-TTS\n` +
-            `• <b>Supported Styles:</b> Anime, Army, Myanmar, Streamer\n` +
-            `• <b>Bound Topic:</b> #215`;
+          const health = await backendRequest(env, "/health");
+          replyText = "AuraCraft Backend Reachable" + String.fromCharCode(10) +
+            "Status: " + escapeHtml(health.status || "healthy") + String.fromCharCode(10) +
+            "Edge-TTS: " + escapeHtml(health.integrations?.edge_tts || "available") + String.fromCharCode(10) +
+            "Narrativ Forge: " + escapeHtml(health.integrations?.narrativ_forge || "not configured") + String.fromCharCode(10) +
+            "Video: manifest only";
         } else if (command === "/characters") {
-          replyText =
-            `🎭 <b>AuraCraft Curated Archetypes:</b>\n\n` +
-            `🌸 <b>Shinji Kazama</b> (Anime Hero | <code>ja-JP-KeitaNeural</code>)\n` +
-            `🌸 <b>Sakura Hoshino</b> (Anime Idol | <code>ja-JP-NanamiNeural</code>)\n` +
-            `🎖️ <b>General Min Zaw</b> (Tactical Commander | <code>my-MM-ThihaNeural</code>)\n` +
-            `🎖️ <b>Captain John Vance</b> (Airborne Recon | <code>en-US-GuyNeural</code>)\n` +
-            `🇲🇲 <b>Daw Nilar</b> (Traditional Thanakha | <code>my-MM-NilarNeural</code>)\n` +
-            `🇲🇲 <b>Min Thar Thant Zin</b> (Royal Court Artist | <code>my-MM-ThihaNeural</code>)\n` +
-            `⚡ <b>Jenny Nova</b> (Cyberpunk Streamer | <code>en-US-JennyNeural</code>)\n\n` +
-            `<i>Select in AuraCraft Web Studio or type <code>/export &lt;id&gt;</code></i>`;
-        } else if (command === "/speak") {
-          const speakText = text.replace(/^\/speak\s*/i, "").trim();
-          if (!speakText) {
-            replyText = `🎙️ <b>Usage:</b> <code>/speak &lt;text to say&gt;</code>\nExample: <code>/speak မင်္ဂလာပါ AuraCraft Studio မှ ကြိုဆိုပါတယ်!</code>`;
-          } else {
-            replyText =
-              `🎙️ <b>Speech Synthesized:</b>\n` +
-              `<i>"${escapeHtml(speakText.slice(0, 200))}"</i>\n\n` +
-              `🔊 Voice: <b>my-MM-NilarNeural</b> (Edge Neural Audio)`;
+          const chars = await backendRequest(env, "/api/characters");
+          if (!Array.isArray(chars)) throw new Error("Character API returned invalid data");
+          replyText = "AuraCraft Characters:" + String.fromCharCode(10) + chars.slice(0, 30).map((c) =>
+            "• " + escapeHtml(c.name) + " — " + escapeHtml(c.id) + " (" + escapeHtml(c.voice_id || "no voice") + ")"
+          ).join(String.fromCharCode(10));
+        } else if (command === "/speak" || command === "/voice") {
+          let speakText = text.includes(" ") ? text.slice(text.indexOf(" ") + 1).trim() : "";
+          let voiceId = "my-MM-NilarNeural";
+          let actorName = "Nilar";
+          if (command === "/voice") {
+            const split = speakText.indexOf(" ");
+            if (split < 1) replyText = "Usage: /voice character_id text to speak";
+            else {
+              const charId = speakText.slice(0, split);
+              speakText = speakText.slice(split + 1).trim();
+              const chars = await backendRequest(env, "/api/characters");
+              const actor = Array.isArray(chars) ? chars.find((c) => c.id === charId) : null;
+              if (!actor) replyText = "Character not found. Use /characters.";
+              else { voiceId = actor.voice_id; actorName = actor.name; }
+            }
+          }
+          if (!replyText) {
+            if (!speakText || speakText.length > 4500) replyText = "Text must contain 1–4,500 characters.";
+            else {
+              const audioResponse = await backendFetch(env, "/api/tts/synthesize", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: speakText, voice: voiceId }),
+              });
+              if (!audioResponse.ok) throw new Error("TTS API returned " + audioResponse.status);
+              const audio = await audioResponse.arrayBuffer();
+              if (!audio.byteLength) throw new Error("TTS returned empty audio");
+              await sendTelegramFile(env, "sendAudio", chatId, topicId, new Blob([audio], { type: "audio/mpeg" }), "auracraft-voice.mp3", "Voice: " + actorName + " (" + voiceId + ")");
+              return new Response(JSON.stringify({ ok: true, command, audio_bytes: audio.byteLength }), { headers: { "Content-Type": "application/json" } });
+            }
           }
         } else if (command === "/export") {
-          const charId = text.replace(/^\/export\s*/i, "").trim();
-          if (!charId) {
-            replyText = `🚀 <b>Usage:</b> <code>/export &lt;character_id&gt;</code>\nExample: <code>/export char_anime_shinji</code>`;
-          } else {
-            replyText =
-              `🚀 <b>Narrativ Forge Export Queued!</b>\n` +
-              `Character Pack <code>${escapeHtml(charId)}</code> has been synced directly to Narrativ Forge character registry.`;
+          const charId = text.includes(" ") ? text.slice(text.indexOf(" ") + 1).trim() : "";
+          if (!charId || charId.length > 120 || !Array.from(charId).every((ch) => /[a-zA-Z0-9_-]/.test(ch))) replyText = "Usage: /export character_id";
+          else {
+            const packResponse = await backendFetch(env, "/api/characters/" + encodeURIComponent(charId) + "/download-pack");
+            if (packResponse.status === 404) replyText = "Character not found. Use /characters.";
+            else if (!packResponse.ok) throw new Error("Export API returned " + packResponse.status);
+            else {
+              const pack = await packResponse.blob();
+              await sendTelegramFile(env, "sendDocument", chatId, topicId, pack, charId + "_auracraft_pack.json", "AuraCraft standalone JSON pack");
+              return new Response(JSON.stringify({ ok: true, command, exported: charId }), { headers: { "Content-Type": "application/json" } });
+            }
           }
         }
 
         // D. Send Telegram response via Bot API if token is configured
         if (replyText && env.TELEGRAM_BOT_TOKEN) {
-          ctx.waitUntil(sendTelegramMessage(
+          await sendTelegramMessage(
             env.TELEGRAM_BOT_TOKEN,
             chatId,
             topicId,
             replyText,
             dashboardKeyboard(env.FRONTEND_BASE_URL),
-          ));
+          );
         }
 
         return new Response(
@@ -179,13 +204,16 @@ async function sendTelegramMessage(botToken, chatId, topicId, htmlText, inlineKe
       parse_mode: "HTML",
     };
     if (inlineKeyboard) payload.reply_markup = { inline_keyboard: inlineKeyboard };
-    await fetch(url, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.description || "Telegram sendMessage failed");
   } catch (e) {
     console.error("Failed to send telegram message:", e);
+    throw e;
   }
 }
 
@@ -196,4 +224,32 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+async function backendBase(env) {
+  let base = String(env.BACKEND_API_URL || "");
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  if (!base.startsWith("https://")) throw new Error("BACKEND_API_URL must be configured as HTTPS");
+  return base;
+}
+async function backendFetch(env, path, init = {}) {
+  const base = await backendBase(env);
+  return fetch(base + path, { ...init, signal: AbortSignal.timeout(25000) });
+}
+async function backendRequest(env, path) {
+  const response = await backendFetch(env, path);
+  if (!response.ok) throw new Error("Backend API returned " + response.status);
+  return response.json();
+}
+async function sendTelegramFile(env, method, chatId, topicId, blob, filename, caption) {
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  form.set("message_thread_id", String(topicId));
+  form.set(method === "sendAudio" ? "audio" : "document", blob, filename);
+  if (caption) form.set("caption", caption);
+  const url = TELEGRAM_API_BASE + "/bot" + env.TELEGRAM_BOT_TOKEN + "/" + method;
+  const response = await fetch(url, { method: "POST", body: form });
+  const result = await response.json();
+  if (!response.ok || !result.ok) throw new Error(result.description || "Telegram file send failed");
+  return result;
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Volume2, Play, Download, Mic, Radio, Sparkles, Sliders, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { lipSync } from '../audio/lipSyncAnalyzer';
+import { API_ENDPOINTS } from '../config/api';
 
 export const VoiceLabPage: React.FC = () => {
   const [selectedVoice, setSelectedVoice] = useState('my-MM-NilarNeural');
@@ -86,7 +87,7 @@ export const VoiceLabPage: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const backendUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/api/tts/synthesize';
+      const backendUrl = API_ENDPOINTS.tts;
       const res = await fetch(backendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

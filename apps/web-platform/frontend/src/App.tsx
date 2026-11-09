@@ -20,6 +20,7 @@ import {
   UserCheck, ShieldCheck, ExternalLink, RefreshCw, Camera, Wand2, Globe
 } from 'lucide-react';
 import { translations, type Language } from './utils/i18n';
+import { saveCustomAsset, loadCustomAsset, deleteCustomAsset } from './utils/customAssetStore';
 
 type NavTab = 'studio' | 'characters' | 'voices' | 'video' | 'broadcast' | 'photo' | 'img2char' | 'settings';
 
@@ -44,7 +45,7 @@ export default function App() {
   const [customCharacters, setCustomCharacters] = useState<StudioCharacter[]>(() => {
     try {
       const saved = localStorage.getItem('auracraft_custom_chars');
-      return saved ? JSON.parse(saved) : [];
+      return saved ? (JSON.parse(saved) as StudioCharacter[]).map((item) => ({ ...item, url: item.assetId ? '' : item.url, avatarThumb: item.assetId ? '' : item.avatarThumb })) : [];
     } catch {
       return [];
     }
@@ -53,17 +54,61 @@ export default function App() {
   const [deletedCharacterIds, setDeletedCharacterIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('auracraft_deleted_chars');
-      return saved ? JSON.parse(saved) : [];
+      return saved ? (JSON.parse(saved) as string[]) : [];
     } catch {
       return [];
     }
   });
 
-  const handleUploadCustomPhoto = (file: File) => {
+  const persistCustomCharacters = (items: StudioCharacter[]) => {
+    try {
+      localStorage.setItem('auracraft_custom_chars', JSON.stringify(items.map((item) =>
+        item.assetId ? { ...item, url: '', avatarThumb: '' } : item
+      )));
+    } catch (error) {
+      console.warn('Unable to persist custom character metadata:', error);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    const urls: string[] = [];
+    (async () => {
+      const restored = await Promise.all(customCharacters.map(async (item) => {
+        if (!item.assetId) return item;
+        try {
+          const blob = await loadCustomAsset(item.assetId);
+          if (!blob) return item;
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          return { ...item, url, avatarThumb: url };
+        } catch (error) {
+          console.warn('Unable to restore custom asset:', item.id, error);
+          return item;
+        }
+      }));
+      if (active) setCustomCharacters(restored);
+    })();
+    return () => {
+      active = false;
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
+
+  const handleUploadCustomPhoto = async (file: File) => {
+    const id = 'custom_photo_' + Date.now();
+    try {
+      await saveCustomAsset(id, file);
+    } catch (error) {
+      window.alert('Unable to store this photo in browser storage. Check available site storage and try again.');
+      console.error(error);
+      return;
+    }
     const url = URL.createObjectURL(file);
     const cleanName = file.name.replace(/\.[^/.]+$/, '');
     const newChar: StudioCharacter = {
-      id: `custom_photo_${Date.now()}`,
+      id,
+      assetId: id,
       name: cleanName,
       role: 'Custom Uploaded Photo',
       category: 'photo',
@@ -77,9 +122,7 @@ export default function App() {
     };
     const updated = [newChar, ...customCharacters];
     setCustomCharacters(updated);
-    try {
-      localStorage.setItem('auracraft_custom_chars', JSON.stringify(updated.slice(0, 10)));
-    } catch {}
+    persistCustomCharacters(updated.slice(0, 10));
 
     setStageMode('photo');
     setPhotoAvatarUrl(url);
@@ -87,11 +130,20 @@ export default function App() {
     setCurrentActorName(cleanName);
   };
 
-  const handleUploadCustomVRM = (file: File) => {
+  const handleUploadCustomVRM = async (file: File) => {
+    const id = 'custom_vrm_' + Date.now();
+    try {
+      await saveCustomAsset(id, file);
+    } catch (error) {
+      window.alert('Unable to store this VRM file in browser storage. Check available site storage and try again.');
+      console.error(error);
+      return;
+    }
     const url = URL.createObjectURL(file);
     const cleanName = file.name.replace(/\.[^/.]+$/, '');
     const newChar: StudioCharacter = {
-      id: `custom_vrm_${Date.now()}`,
+      id,
+      assetId: id,
       name: cleanName,
       role: 'Custom 3D Model',
       category: 'realistic',
@@ -105,6 +157,7 @@ export default function App() {
     };
     const updated = [newChar, ...customCharacters];
     setCustomCharacters(updated);
+    persistCustomCharacters(updated.slice(0, 10));
     setStageMode('3d');
     setCurrentModelUrl(url);
     setCurrentModelName(cleanName);
@@ -127,6 +180,7 @@ export default function App() {
     };
     const updated = [newChar, ...customCharacters];
     setCustomCharacters(updated);
+    persistCustomCharacters(updated.slice(0, 10));
     setStageMode('3d');
     setCurrentModelUrl(url);
     setCurrentModelName('Ready Player Me 3D');
@@ -136,11 +190,12 @@ export default function App() {
   const handleDeleteCharacter = (id: string) => {
     const isCustom = customCharacters.some(c => c.id === id);
     if (isCustom) {
+      const removed = customCharacters.find((c) => c.id === id);
       const nextCustom = customCharacters.filter(c => c.id !== id);
       setCustomCharacters(nextCustom);
-      try {
-        localStorage.setItem('auracraft_custom_chars', JSON.stringify(nextCustom));
-      } catch {}
+      persistCustomCharacters(nextCustom);
+      if (removed?.assetId) void deleteCustomAsset(removed.assetId).catch(console.warn);
+      if (removed?.url?.startsWith('blob:')) URL.revokeObjectURL(removed.url);
     } else {
       const nextDeleted = [...deletedCharacterIds, id];
       setDeletedCharacterIds(nextDeleted);

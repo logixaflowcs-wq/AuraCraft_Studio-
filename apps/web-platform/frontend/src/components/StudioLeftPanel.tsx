@@ -6,6 +6,7 @@ import {
 import { translations, type Language } from '../utils/i18n';
 
 export interface StudioCharacter {
+  assetId?: string;
   id: string;
   name: string;
   role: string;

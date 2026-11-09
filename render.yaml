@@ -9,5 +9,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
+      - key: APP_ENV
+        value: production
+      - key: CORS_ORIGINS
+        value: https://auracraft-studio.netlify.app
+      - key: API_ADMIN_KEY
+        sync: false
     rootDir: apps/web-platform/backend
     healthCheckPath: /health

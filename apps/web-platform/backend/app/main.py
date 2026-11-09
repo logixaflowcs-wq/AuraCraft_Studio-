@@ -21,15 +21,24 @@ app = FastAPI(
     version="1.0.0",
 )
 
+def _cors_origins() -> list[str]:
+    configured = os.getenv("CORS_ORIGINS", "").strip()
+    if configured:
+        return [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
+    if os.getenv("APP_ENV", "development").lower() not in {"production", "prod"}:
+        return ["http://localhost:5173", "http://127.0.0.1:5173"]
+    return []
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins(),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Telegram-Bot-Api-Secret-Token", "X-AuraCraft-Admin-Key"],
 )
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(os.getenv("AURACRAFT_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))).expanduser().resolve()
 CHARACTERS_FILE = DATA_DIR / "characters.json"
 RENDER_PLAN_DIR = DATA_DIR / "render_plans"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -200,8 +209,10 @@ def load_characters() -> List[Dict[str, Any]]:
         return DEFAULT_CHARACTERS
 
 def save_characters(data: List[Dict[str, Any]]) -> None:
-    with open(CHARACTERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    CHARACTERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = CHARACTERS_FILE.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(CHARACTERS_FILE)
 
 
 # Pydantic Schemas
@@ -225,7 +236,7 @@ class CharacterCreate(BaseModel):
     voice_id: str = Field(default="my-MM-NilarNeural")
     language: str = Field(default="my-MM")
     personality: str = Field(default="Enthusiastic and polite")
-    vrm_model: str = Field(default="/models/sample_avatar_a.vrm")
+    vrm_model: str = Field(default="/models/avatar_female_a.vrm", max_length=500)
     default_emotion: str = Field(default="neutral")
     avatar_color: Optional[str] = Field(default="#8b5cf6")
     tags: List[str] = Field(default_factory=list)
@@ -256,7 +267,7 @@ class ManualPersonaPack(BaseModel):
     role: str = Field(default="Virtual Actor", max_length=100)
     style: str = Field(default="custom", max_length=50)
     voice_binding: PersonaVoiceBinding
-    vrm_model_path: str = Field(default="/models/sample_avatar_a.vrm", max_length=500)
+    vrm_model_path: str = Field(default="/models/avatar_female_a.vrm", max_length=500)
     avatar_color: str = Field(default="#8b5cf6", max_length=20)
     default_emotion: str = Field(default="neutral", max_length=40)
     character_meta: PersonaCharacterMeta
@@ -271,11 +282,18 @@ def health_check():
     return {
         "status": "healthy",
         "service": "AuraCraft Studio Backend",
-        "supported_voices": 8,
+        "supported_voices": 9,
         "default_language": "my-MM",
         "supported_archetypes": ["anime", "army", "myanmar", "streamer"],
-        "telegram_topic": 215,
-        "telegram_chat_id": "-1003992125718",
+        "telegram_topic": TELEGRAM_TOPIC_ID,
+        "telegram_chat_id": TELEGRAM_GROUP_CHAT_ID,
+        "integrations": {
+            "telegram_webhook_configured": bool(TELEGRAM_WEBHOOK_SECRET),
+            "telegram_bot_configured": bool(TELEGRAM_BOT_TOKEN),
+            "edge_tts": "available",
+            "narrativ_forge": "not_configured",
+            "video_rendering": "manifest_only",
+        },
     }
 
 
@@ -291,8 +309,19 @@ def _production_mode() -> bool:
     return environment.lower() in {"production", "prod"}
 
 
+def _require_admin(api_key: Optional[str]) -> None:
+    """Protect character-library mutation endpoints in production deployments."""
+    if not _production_mode():
+        return
+    expected = os.getenv("API_ADMIN_KEY", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="API_ADMIN_KEY is not configured")
+    if not api_key or not hmac.compare_digest(api_key, expected):
+        raise HTTPException(status_code=401, detail="Invalid admin API key")
+
+
 def _allowed_telegram_user_ids() -> set[str]:
-    return {item.strip() for item in os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").split(",") if item.strip()}
+    return {item.strip() for item in os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").replace(";", ",").split(",") if item.strip()}
 
 
 @app.post("/api/telegram/webhook")
@@ -322,9 +351,9 @@ async def telegram_webhook(
 
     allowed_users = _allowed_telegram_user_ids()
     user_id = message.get("from", {}).get("id")
-    if _production_mode() and not allowed_users:
+    if not allowed_users:
         raise HTTPException(status_code=503, detail="Telegram user allowlist is not configured")
-    if allowed_users and str(user_id) not in allowed_users:
+    if not user_id or str(user_id) not in allowed_users:
         return {"ok": True, "ignored": "unauthorized_user"}
 
     text = message.get("text", "").strip()
@@ -399,7 +428,7 @@ async def telegram_webhook(
 
 @app.get("/api/tts/voices")
 def get_voices():
-    """Return catalog of zero-cost Edge-TTS voices covering Burmese, Japanese Anime, and English."""
+    """Return the supported Burmese, Japanese, English, Chinese and Korean Edge-TTS voices."""
     return [
         {"id": "my-MM-NilarNeural", "name": "Nilar (Burmese Female Cultural Host)", "gender": "Female", "locale": "my-MM", "archetype": "myanmar"},
         {"id": "my-MM-ThihaNeural", "name": "Thiha (Burmese Male Anchor/Officer)", "gender": "Male", "locale": "my-MM", "archetype": "army_myanmar"},
@@ -408,6 +437,8 @@ def get_voices():
         {"id": "en-US-JennyNeural", "name": "Jenny (US English Streamer/Cyberpunk)", "gender": "Female", "locale": "en-US", "archetype": "streamer"},
         {"id": "en-US-GuyNeural", "name": "Guy (US English Tactical Commander)", "gender": "Male", "locale": "en-US", "archetype": "army"},
         {"id": "en-US-AriaNeural", "name": "Aria (US English Expressive/Narrator)", "gender": "Female", "locale": "en-US", "archetype": "streamer"},
+        {"id": "zh-CN-XiaoxiaoNeural", "name": "Xiaoxiao (Mandarin Chinese Female)", "gender": "Female", "locale": "zh-CN", "archetype": "general"},
+        {"id": "ko-KR-SunHiNeural", "name": "SunHi (Korean Female)", "gender": "Female", "locale": "ko-KR", "archetype": "general"},
     ]
 
 
@@ -439,8 +470,10 @@ async def synthesize_speech(payload: SynthesizeRequest):
                 "X-Voice-Used": payload.voice,
             }
         )
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"TTS synthesis error: {str(exc)}")
+        raise HTTPException(status_code=502, detail=f"TTS synthesis failed: {type(exc).__name__}")
 
 
 @app.post("/api/avatar-video/render-plan")
@@ -567,7 +600,11 @@ def list_characters(style: Optional[str] = Query(None, description="Filter by st
 
 
 @app.post("/api/characters")
-def create_character(payload: CharacterCreate):
+def create_character(
+    payload: CharacterCreate,
+    x_auracraft_admin_key: Optional[str] = Header(None),
+):
+    _require_admin(x_auracraft_admin_key)
     chars = load_characters()
     char_id = f"char_{payload.style}_{payload.name.lower().replace(' ', '_')}_{len(chars)+1}"
     new_char = {
@@ -591,8 +628,11 @@ def create_character(payload: CharacterCreate):
 def _import_persona_pack(pack: ManualPersonaPack, chars: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Import an explicit local pack without overwriting an existing actor."""
     actor_id = pack.actor_id.strip()
-    if ".." in pack.vrm_model_path or not pack.vrm_model_path.startswith("/models/"):
-        raise HTTPException(status_code=422, detail="VRM model path must stay inside /models/")
+    allowed_root_models = {"/sample_avatar.vrm", "/avatar_human.vrm"}
+    if ".." in pack.vrm_model_path or not (
+        pack.vrm_model_path.startswith("/models/") or pack.vrm_model_path in allowed_root_models
+    ):
+        raise HTTPException(status_code=422, detail="VRM model path must reference a bundled public model")
     if any(character.get("id") == actor_id for character in chars):
         return {"status": "skipped", "actor_id": actor_id, "reason": "actor_id already exists"}
 
@@ -614,8 +654,12 @@ def _import_persona_pack(pack: ManualPersonaPack, chars: List[Dict[str, Any]]) -
 
 
 @app.post("/api/characters/import-pack")
-def import_persona_pack(pack: ManualPersonaPack):
+def import_persona_pack(
+    pack: ManualPersonaPack,
+    x_auracraft_admin_key: Optional[str] = Header(None),
+):
     """Import one user-selected JSON persona pack into AuraCraft only."""
+    _require_admin(x_auracraft_admin_key)
     chars = load_characters()
     result = _import_persona_pack(pack, chars)
     if result["status"] == "imported":
@@ -624,8 +668,12 @@ def import_persona_pack(pack: ManualPersonaPack):
 
 
 @app.post("/api/characters/import-packs")
-def import_persona_packs(batch: ManualPersonaPackBatch):
+def import_persona_packs(
+    batch: ManualPersonaPackBatch,
+    x_auracraft_admin_key: Optional[str] = Header(None),
+):
     """Import selected JSON packs atomically; conflicts are reported, never replaced."""
+    _require_admin(x_auracraft_admin_key)
     chars = load_characters()
     results = [_import_persona_pack(pack, chars) for pack in batch.packs]
     if any(result["status"] == "imported" for result in results):
@@ -638,8 +686,12 @@ def import_persona_packs(batch: ManualPersonaPackBatch):
 
 
 @app.post("/api/characters/export-pack")
-def export_character_pack(payload: PersonaPackExportRequest):
+def export_character_pack(
+    payload: PersonaPackExportRequest,
+    x_auracraft_admin_key: Optional[str] = Header(None),
+):
     """Package a character from AuraCraft Studio into a standalone downloadable JSON asset pack."""
+    _require_admin(x_auracraft_admin_key)
     chars = load_characters()
     target = next((c for c in chars if c["id"] == payload.character_id), None)
     if not target:

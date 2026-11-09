@@ -67,3 +67,8 @@ apps/backend-service/data/narrativ_exports/
 Thumbs.db
 desktop.ini
 ehthumbs.db
+
+# Runtime-generated backend output (preserve already tracked reference packs)
+apps/web-platform/backend/data/render_plans/
+apps/web-platform/backend/data/exported_packs/*.tmp
+*.json.tmp

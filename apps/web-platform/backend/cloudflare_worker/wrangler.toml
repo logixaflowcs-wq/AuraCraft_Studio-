@@ -12,8 +12,9 @@ TELEGRAM_GROUP_CHAT_ID = "-1003992125718"
 STUDIO_NAME = "AuraCraft Studio"
 ENVIRONMENT = "production"
 # Configure this in the Worker dashboard or with `wrangler secret put`.
-# The worker fails closed until the two owner account IDs are supplied.
-TELEGRAM_ALLOWED_USER_IDS = "1686310706,6759217947"
+# The Worker fails closed until the Telegram user allowlist secret is supplied.
+BACKEND_API_URL = "https://auracraft-backend.onrender.com"
+# Set TELEGRAM_ALLOWED_USER_IDS with: npx wrangler secret put TELEGRAM_ALLOWED_USER_IDS
 
 # Secrets to be configured via `wrangler secret put <NAME>`:
 # - TELEGRAM_BOT_TOKEN

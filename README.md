@@ -1,118 +1,110 @@
-# 🔮 AuraCraft Studio — Real-Time 3D Virtual Persona & Neural Voice Studio
+# AuraCraft Studio
 
-> **Project:** AuraCraft Studio  
-> **Directory:** `D:\Project\logixaflow.cs@gmail.com\AuraCraft_Studio-`  
-> **Mission:** 100% Free, Zero-Cost Real-Time 3D VRM Virtual Persona, Edge-TTS Neural Voice & Autonomous Live Streamer Engine  
-> **Telegram Integration:** The Nexus Hub (`-1003992125718`) | Topic `#215` | Bot: `@AuraCraftNexusBot`  
-> **Target Platforms:** Web Browser, OBS Studio Browser Source, YouTube Live, Twitch, Kick, Narrativ Forge Video Bridge  
+AuraCraft Studio is a React/Vite virtual-avatar studio with a FastAPI service, Edge-TTS audio generation, character packs, a local video-plan manifest workflow, and an optional Cloudflare Telegram bot.
 
----
+## Current architecture
 
-## 🌟 Architecture Overview
+- Frontend: React 19, TypeScript, Vite, Three.js and @pixiv/three-vrm.
+- Backend: FastAPI, Pydantic and edge-tts.
+- Voice: POST /api/tts/synthesize returns MPEG audio. Voice generation requires outbound access to the Edge-TTS service.
+- Characters: GET/POST /api/characters and JSON pack import/export endpoints.
+- Video Studio: creates and stores a reviewable JSON render plan. It does not render an MP4/video.
+- Telegram: Cloudflare Worker restricts commands to the configured supergroup, forum topic and numeric user allowlist. It calls the FastAPI backend for characters, speech and JSON downloads.
+- OBS: use the browser overlay route (?obs=true) after configuring the frontend/backend URLs.
 
-```mermaid
-graph LR
-    User["User Voice / Telegram Bot (#215)"] --> AI["Edge AI Coordinator"]
-    AI --> TTS["Microsoft Edge Neural TTS (Zero Cost)"]
-    TTS --> LipSync["Web Audio FFT Viseme Extractor"]
-    LipSync --> VRM["Three.js / WebGL 3D VRM Avatar"]
-    VRM --> Bridge["Narrativ Forge Video Pack Export"]
-    VRM --> OBS["OBS Studio / Virtual Camera / Stream"]
-```
+Narrativ Forge is not connected to a live remote API in this repository. The export command sends a standalone JSON file; it must not be described as a remote sync.
 
----
+## Repository layout
 
-## ⚡ Technology Stack
+    apps/
+      mobile/                         Mobile companion placeholder
+      web-platform/
+        backend/
+          app/main.py                 FastAPI routes and services
+          data/characters.json        Curated character catalogue
+          cloudflare_worker/          Telegram Cloudflare Worker
+          tests/                      Backend and Telegram policy tests
+        frontend/
+          public/                      Static images and VRM assets
+          src/                         React application
+    package.json                       Root scripts
+    package-lock.json                  Reproducible npm dependency lock
+    render.yaml                        Render backend service blueprint
+    vercel.json                        Vercel frontend build configuration
 
-1. **3D Avatar & Graphics Engine:**
-   * **Three.js** + **`@pixiv/three-vrm`** (Global industry standard 3D humanoid avatar format).
-   * Spring bone physics for dynamic hair and clothing.
-   * Procedural blendshapes: Auto-blink, breathing idle motion, emotion facial morphs (happy, sad, angry, surprised, neutral).
+## Local development
 
-2. **Real-Time Lip-Sync Engine:**
-   * **Web Audio API** + **Audio AnalyserNode (Fast Fourier Transform)**.
-   * Maps audio frequencies directly to VRM vowel blendshapes (`A`, `I`, `U`, `E`, `O`) in real-time with zero latency.
+Requirements: Node.js 20+ and Python 3.11+.
 
-3. **Curated Multi-Style Archetypes:**
-   * 🌸 **Anime & Manga Style**: Shinji Kazama (`ja-JP-KeitaNeural`), Sakura Hoshino (`ja-JP-NanamiNeural`)
-   * 🎖️ **Army & Military Tactical**: General Min Zaw (`my-MM-ThihaNeural`), Captain John Vance (`en-US-GuyNeural`)
-   * 🇲🇲 **Myanmar Traditional & Cultural**: Daw Nilar (`my-MM-NilarNeural`), Min Thar Thant Zin (`my-MM-ThihaNeural`)
-   * ⚡ **VTuber & Cyberpunk Streamer**: Jenny Nova (`en-US-JennyNeural`)
+    npm ci
+    python -m venv .venv
+    # Windows: .venv\Scripts\activate
+    # macOS/Linux: source .venv/bin/activate
+    pip install -r apps/web-platform/backend/requirements.txt
 
-4. **Speech Synthesis (TTS):**
-   * **Microsoft Edge Neural TTS (`edge-tts`)** for zero-cost, human-quality neural voices in Burmese (`my-MM-NilarNeural`, `my-MM-ThihaNeural`), Japanese, and English.
+Start the frontend:
 
-5. **Telegram Bot Webhook (Topic #215 Scoped):**
-   * **Cloudflare Workers (Edge)**: Zero-cost serverless webhook receiver (100,000 free requests/day) running without Render paid worker limits.
-   * Enforces fail-closed isolation: updates outside Topic 215 are safely ignored.
+    npm run dev
 
-6. **Narrativ Forge Video Bridge:**
-   * One-click export syncing 3D persona metadata, voice bindings, and blendshapes directly into Narrativ Forge character registry for manga panels and AI video productions.
+Start the backend in another terminal:
 
----
+    npm run dev:backend
 
-## 📁 Repository Structure
+The frontend uses http://localhost:8010 for the API in development. Set VITE_API_URL to override it.
 
-```
-AuraCraft_Studio-/
-├── .env.production          # Production environment configurations (Git ignored)
-├── .env.production.example  # Public environment template
-├── .gitignore               # Comprehensive exclusion rules
-├── package.json             # Root monorepo workspace & launcher scripts
-├── README.md                # Project architecture & documentation
-├── cloudflare_worker/       # Zero-cost Telegram Edge Webhook
-│   ├── index.js             # Topic 215 scoped webhook router
-│   ├── wrangler.toml        # Cloudflare configuration
-│   └── README.md            # Cloudflare deployment guide
-└── apps/
-    ├── web-studio/          # React 19 / Vite / Three.js 3D Viewport & Studio UI
-    │   ├── public/
-    │   │   ├── logo.svg     # AuraCraft pure vector SVG brand emblem
-    │   │   └── models/      # Bundled VRM sample avatar models
-    │   └── src/
-    │       ├── components/  # AuraCraftLogo, AudioVisualizer, Viewport, Controls
-    │       └── vrm/         # VRM loader, blendshape controllers, audio FFT
-    └── backend-service/     # FastAPI Python service & Edge-TTS engine
-        ├── app/
-        │   └── main.py      # FastAPI endpoints, Telegram webhook & Narrativ bridge
-        ├── data/
-        │   └── characters.json # Curated archetypes database
-        └── tests/
-            ├── test_character_archetypes.py # Archetype test suite
-            └── test_telegram_topic_215.py   # Topic 215 security contract tests
-```
+## Verification
 
----
+    npm ci
+    npm run build
+    npm run test:backend
+    npm run test:worker
+    node --check apps/web-platform/backend/cloudflare_worker/index.js
 
-## 🚀 Quick Start
+The backend tests use temporary directories for generated character data and render plans so they do not modify the checked-in catalogue.
 
-### 1. Launch AuraCraft Studio Locally
-From repository root:
-```bash
-# Install dependencies
-npm install
+## Backend configuration
 
-# Start Frontend Studio
-npm run dev
+Important environment variables:
 
-# Start Backend Service (in another terminal)
-npm run dev:backend
-```
+- APP_ENV=production
+- CORS_ORIGINS: comma-separated exact frontend origins. Do not use wildcard origins in production.
+- TELEGRAM_CHAT_ID and TELEGRAM_TOPIC_ID: backend webhook scope.
+- TELEGRAM_WEBHOOK_SECRET: Telegram webhook secret for the optional FastAPI webhook route.
+- TELEGRAM_ALLOWED_USER_IDS: comma-separated numeric Telegram user IDs. The backend webhook fails closed if this is empty.
+- API_ADMIN_KEY: long random secret required for production character create/import/export mutation endpoints. Send it as X-AuraCraft-Admin-Key from trusted server-side tools only; do not embed it in frontend code.
+- AURACRAFT_DATA_DIR: optional writable data directory. Use this only when the deployment has a persistent mounted volume.
 
-### 2. Run Tests
-```bash
-# Run Backend & Telegram Topic 215 Test Suite
-npm run test:backend
+Render currently uses a free web service. Its filesystem is ephemeral; character edits and generated plans can be lost when the service restarts or redeploys. Durable server-side character storage requires a persistent disk or database. A persistent Render disk is a paid resource and is intentionally not provisioned by this repository blueprint.
 
-# Run Frontend Typecheck & Build
-npm run build
-```
+## Telegram Worker deployment
 
-### 3. Deploy Zero-Cost Telegram Bot to Cloudflare
-```bash
-cd cloudflare_worker
-npx wrangler login
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-npx wrangler deploy
-```
+From apps/web-platform/backend/cloudflare_worker:
+
+    npx wrangler login
+    npx wrangler secret put TELEGRAM_BOT_TOKEN
+    npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+    npx wrangler secret put TELEGRAM_ALLOWED_USER_IDS
+    npx wrangler deploy
+
+Set BACKEND_API_URL in wrangler.toml to the HTTPS FastAPI origin before deploying. The default value is the repository's Render service hostname; change it if your service uses another domain.
+
+Register the Worker URL as the Telegram webhook using setWebhook and the same webhook secret. Never commit bot tokens or webhook secrets. The user allowlist is mandatory: commands are ignored when it is missing or the sender is not listed.
+
+Supported commands in the configured topic:
+
+- /status
+- /characters
+- /speak text
+- /voice character_id text
+- /export character_id
+
+The Worker sends generated audio and JSON packs as Telegram attachments. It does not claim an export has reached Narrativ Forge.
+
+## Deployment notes and limitations
+
+- Frontend production API default: https://auracraft-backend.onrender.com. Override with VITE_API_URL if the backend has a different domain.
+- The Render blueprint allows the Netlify origin shown in render.yaml. Update CORS_ORIGINS to your exact deployed frontend origin if it changes.
+- Cloudflare secrets and Telegram webhook registration must be configured in the Cloudflare account; a GitHub change alone cannot provision those credentials.
+- Video Studio currently produces a JSON plan only. Actual video rendering requires a separately selected render engine/provider.
+- OBS browser overlay and live broadcast output must be tested against the actual browser, capture device and streaming setup before production use.
+- Edge-TTS availability in the health response indicates the backend package is installed; it does not guarantee the upstream speech service is reachable at every moment.

@@ -7,7 +7,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Determined, heroic, courageous young anime mech pilot fighting for humanity",
-    "vrm_model": "/models/sample_avatar_c.vrm",
+    "vrm_model": "/sample_avatar.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#38bdf8",
     "tags": [
@@ -26,7 +26,7 @@
     "voice_id": "ja-JP-NanamiNeural",
     "language": "ja-JP",
     "personality": "Cheerful, energetic magical girl idol bringing hope and celestial light",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "happy",
     "avatar_color": "#ec4899",
     "tags": [
@@ -45,7 +45,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Calm, brooding master swordsman with supernatural shadow abilities",
-    "vrm_model": "/models/sample_avatar_b.vrm",
+    "vrm_model": "/models/avatar_female_c.vrm",
     "default_emotion": "angry",
     "avatar_color": "#a855f7",
     "tags": [
@@ -63,7 +63,7 @@
     "voice_id": "my-MM-ThihaNeural",
     "language": "my-MM",
     "personality": "Strategic, authoritative, disciplined high-ranking military commander with tactical acumen",
-    "vrm_model": "/models/sample_avatar_b.vrm",
+    "vrm_model": "/models/avatar_female_c.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#84cc16",
     "tags": [
@@ -82,7 +82,7 @@
     "voice_id": "my-MM-ThihaNeural",
     "language": "my-MM",
     "personality": "Hardened combat veteran, fearless frontline squad leader ready for special ops missions",
-    "vrm_model": "/models/sample_avatar_b.vrm",
+    "vrm_model": "/models/avatar_female_c.vrm",
     "default_emotion": "angry",
     "avatar_color": "#eab308",
     "tags": [
@@ -101,7 +101,7 @@
     "voice_id": "en-US-GuyNeural",
     "language": "en-US",
     "personality": "Decisive, tactical airborne specialist delivering battlefield briefs and recon updates",
-    "vrm_model": "/models/sample_avatar_c.vrm",
+    "vrm_model": "/sample_avatar.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#10b981",
     "tags": [
@@ -120,7 +120,7 @@
     "voice_id": "my-MM-NilarNeural",
     "language": "my-MM",
     "personality": "Gracious, elegant Burmese cultural ambassador with traditional thanakha artistry",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "happy",
     "avatar_color": "#f59e0b",
     "tags": [
@@ -139,7 +139,7 @@
     "voice_id": "my-MM-ThihaNeural",
     "language": "my-MM",
     "personality": "Eloquent classical royal court narrator and dramatic performing artist with rich historical wisdom",
-    "vrm_model": "/models/sample_avatar_b.vrm",
+    "vrm_model": "/models/avatar_female_c.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#d97706",
     "tags": [
@@ -158,7 +158,7 @@
     "voice_id": "my-MM-NilarNeural",
     "language": "my-MM",
     "personality": "Warm, authentic Bagan heritage storyteller sharing ancient folklore and cultural traditions",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "happy",
     "avatar_color": "#fb923c",
     "tags": [
@@ -176,7 +176,7 @@
     "voice_id": "en-US-JennyNeural",
     "language": "en-US",
     "personality": "Energetic, witty, tech-savvy cyberpunk virtual streamer and gaming creator",
-    "vrm_model": "/models/sample_avatar_c.vrm",
+    "vrm_model": "/sample_avatar.vrm",
     "default_emotion": "surprised",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -194,7 +194,7 @@
     "voice_id": "en-US-AriaNeural",
     "language": "en-US",
     "personality": "Chill, atmospheric music host and digital artist curating creative beats and stories",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "happy",
     "avatar_color": "#8b5cf6",
     "tags": [
@@ -212,7 +212,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -229,7 +229,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -246,7 +246,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -263,7 +263,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -280,7 +280,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -297,7 +297,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -314,7 +314,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -331,7 +331,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -348,7 +348,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -365,7 +365,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -382,7 +382,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -399,7 +399,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -416,7 +416,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -433,7 +433,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -450,7 +450,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -467,7 +467,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -484,7 +484,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -501,7 +501,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -518,7 +518,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -535,7 +535,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -552,7 +552,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -569,7 +569,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -586,7 +586,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -603,7 +603,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [
@@ -620,7 +620,7 @@
     "voice_id": "ja-JP-KeitaNeural",
     "language": "ja-JP",
     "personality": "Fearless vanguard mecha pilot",
-    "vrm_model": "/models/sample_avatar_a.vrm",
+    "vrm_model": "/models/avatar_female_a.vrm",
     "default_emotion": "neutral",
     "avatar_color": "#06b6d4",
     "tags": [

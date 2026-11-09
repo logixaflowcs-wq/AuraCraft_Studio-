@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { API_ENDPOINTS } from '../config/api';
 import { Clapperboard, Video, Plus, Trash2, Download, Check, Sparkles, Smartphone, Monitor, Clock, Play } from 'lucide-react';
 
 export const VideoStudioPage: React.FC = () => {
@@ -32,6 +33,8 @@ export const VideoStudioPage: React.FC = () => {
 
   const [generatedPlan, setGeneratedPlan] = useState<any | null>(null);
   const [exported, setExported] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const addScene = () => {
     const newId = scenes.length + 1;
@@ -58,27 +61,56 @@ export const VideoStudioPage: React.FC = () => {
 
   const totalEstimatedSeconds = scenes.length * durationPerScene;
 
-  const handleGenerateManifest = () => {
-    const manifest = {
-      project: 'AuraCraft Studio - Video Render Plan',
-      version: '1.0.0',
-      aspect_ratio: aspectRatio,
-      character: characterName,
-      voice_id: voiceId,
-      total_scenes: scenes.length,
-      estimated_duration_seconds: totalEstimatedSeconds,
-      timeline: scenes.map((s, idx) => ({
-        scene_index: idx + 1,
-        title: s.title,
-        script: s.script,
-        emotion: s.emotion,
-        camera_preset: s.camera,
-        duration_seconds: durationPerScene,
-      })),
-      target_destinations: ['Narrativ Forge Manga Studio', 'OBS Stream Video Player'],
-    };
-
-    setGeneratedPlan(manifest);
+  const handleGenerateManifest = async () => {
+    const script = scenes.map((scene) => scene.script.trim()).filter(Boolean).join(String.fromCharCode(10));
+    if (!script) {
+      setError('Add dialogue to at least one scene before generating a plan.');
+      return;
+    }
+    setIsGenerating(true);
+    setError(null);
+    setGeneratedPlan(null);
+    try {
+      const charactersResponse = await fetch(API_ENDPOINTS.characters);
+      if (!charactersResponse.ok) throw new Error('Character API returned ' + charactersResponse.status);
+      const characters = await charactersResponse.json();
+      const selected = characters.find((item: { name: string; id: string }) => item.name === characterName)
+        || characters.find((item: { id: string }) => item.id === 'char_anime_shinji');
+      if (!selected) throw new Error('No matching character exists in the backend library.');
+      const response = await fetch(API_ENDPOINTS.renderPlan, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          character_id: selected.id,
+          script,
+          aspect_ratio: aspectRatio,
+          seconds_per_scene: durationPerScene,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || 'Render-plan API returned ' + response.status);
+      }
+      const plan = await response.json();
+      setGeneratedPlan({
+        ...plan,
+        project: 'AuraCraft Studio - Video Render Plan',
+        voice_id: selected.voice_id,
+        timeline: scenes.map((scene, index) => ({
+          scene_index: index + 1,
+          title: scene.title,
+          script: scene.script,
+          emotion: scene.emotion,
+          camera_preset: scene.camera,
+          duration_seconds: durationPerScene,
+        })),
+        rendering: 'Manifest only — this endpoint does not render a video file.',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create render plan.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleDownloadManifest = () => {
@@ -261,13 +293,15 @@ export const VideoStudioPage: React.FC = () => {
             <div className="pt-3 border-t border-[#1f293d] flex gap-2">
               <button
                 onClick={handleGenerateManifest}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-purple-600/25 transition-all text-center"
+                disabled={isGenerating}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-purple-600/25 transition-all text-center"
               >
-                Generate Plan Manifest
+                {isGenerating ? 'Generating…' : 'Generate Plan Manifest'}
               </button>
             </div>
           </div>
 
+          {error && <p role="alert" className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded-xl p-3">{error}</p>}
           {/* Manifest JSON Preview */}
           {generatedPlan && (
             <div className="bg-[#0a0d14] border border-[#23314f] rounded-2xl p-4 space-y-3 shadow-xl">

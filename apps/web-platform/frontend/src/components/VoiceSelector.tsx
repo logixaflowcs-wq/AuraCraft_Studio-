@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Volume2, Mic, Play, Loader2, Download, Sliders, Sparkles, MessageSquare } from 'lucide-react';
 import { lipSync } from '../audio/lipSyncAnalyzer';
+import { API_ENDPOINTS } from '../config/api';
 import { translations, type Language } from '../utils/i18n';
 
 interface VoiceSelectorProps {
@@ -46,7 +47,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
     setLoading(true);
 
     try {
-      const backendUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/api/tts/synthesize';
+      const backendUrl = API_ENDPOINTS.tts;
       const rateStr = rate >= 1.0 ? `+${Math.round((rate - 1.0) * 100)}%` : `-${Math.round((1.0 - rate) * 100)}%`;
       const pitchStr = pitch >= 0 ? `+${pitch}Hz` : `${pitch}Hz`;
 

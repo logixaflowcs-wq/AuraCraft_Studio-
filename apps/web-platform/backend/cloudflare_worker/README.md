@@ -1,13 +1,15 @@
 # AuraCraft Studio — Cloudflare Edge Telegram Bot Worker
 
-Zero-cost, serverless Telegram bot webhook running on Cloudflare Workers (100,000 free requests per day).
+Serverless Telegram bot webhook running on Cloudflare Workers. Check the current Cloudflare plan limits before deployment.
 
 ## Features
 - **Bot Username**: `@AuraCraftNexusBot` (https://t.me/AuraCraftNexusBot)
 - **Supergroup Scoped**: Strictly bound to chat `-1003992125718`
 - **Topic 215 Enforcement**: Messages outside Topic 215 are safely ignored (fail-closed)
-- **Zero Compute Cost**: Runs entirely on Cloudflare Free Tier without paid Render workers
-- **Edge Performance**: Sub-50ms response latency globally
+- **Backend integration**: `/status`, `/characters`, `/speak`, `/voice`, and `/export` call the configured FastAPI backend; audio and JSON files are sent as Telegram attachments.
+- **Fail-closed access**: Missing user allowlist, chat ID, topic ID, bot token, or webhook secret cannot authorize a command.
+- **Real health check**: GET /health checks the configured FastAPI backend and reports degraded status when the backend or Telegram secrets are unavailable.
+- **Zero Compute Cost**: Runs on Cloudflare Workers; the FastAPI backend remains a separate service.
 
 ---
 
@@ -21,7 +23,7 @@ Zero-cost, serverless Telegram bot webhook running on Cloudflare Workers (100,00
 ---
 
 ## 2. Deploy Cloudflare Worker (Zero Cost)
-From `D:\Project\logixaflow.cs@gmail.com\AuraCraft_Studio-\apps\web-platform\backend\cloudflare_worker`:
+From the repository directory apps/web-platform/backend/cloudflare_worker:
 
 ```bash
 # 1. Login to your free Cloudflare account
@@ -35,10 +37,11 @@ npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 # Paste a strong, private webhook secret.
 
-# 4. Set the two authorized owner IDs
 npx wrangler secret put TELEGRAM_ALLOWED_USER_IDS
+# Enter only authorized Telegram numeric user IDs, comma-separated.
 
-# 5. Deploy worker to Cloudflare Edge
+# 4. Confirm BACKEND_API_URL in wrangler.toml points to your HTTPS backend
+# 5. Deploy worker to Cloudflare
 npx wrangler deploy
 ```
 
@@ -59,4 +62,4 @@ Or open in browser:
 Use Telegram's Bot API with the same two private values; do not place either credential in a browser URL or documentation.
 ```
 
-You are all set! AuraCraft Studio Bot will now respond inside Topic #215 at zero cost.
+After deployment, verify GET /health reports the backend as healthy. The Worker does not claim Narrativ Forge is connected: exports are downloadable standalone JSON packs until a real destination API is configured.

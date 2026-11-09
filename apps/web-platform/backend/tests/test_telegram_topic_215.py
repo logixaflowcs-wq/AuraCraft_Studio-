@@ -14,7 +14,7 @@ def telegram_test_configuration(monkeypatch):
     import app.main as main
 
     monkeypatch.setattr(main, "TELEGRAM_WEBHOOK_SECRET", "test-webhook-secret")
-    monkeypatch.delenv("TELEGRAM_ALLOWED_USER_IDS", raising=False)
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "7890")
 
 
 def test_telegram_health_topic_215():
@@ -180,3 +180,58 @@ def test_telegram_production_rejects_unlisted_user():
         )
     assert res.status_code == 200
     assert res.json()["ignored"] == "unauthorized_user"
+
+
+def test_telegram_missing_user_allowlist_fails_closed(monkeypatch):
+    import app.main as main
+
+    monkeypatch.delenv("TELEGRAM_ALLOWED_USER_IDS", raising=False)
+    payload = {
+        "message": {
+            "message_thread_id": 215,
+            "chat": {"id": -1003992125718, "type": "supergroup"},
+            "from": {"id": 7890},
+            "text": "/status",
+        },
+    }
+    response = client.post(
+        "/api/telegram/webhook",
+        json=payload,
+        headers={"x-telegram-bot-api-secret-token": "test-webhook-secret"},
+    )
+    assert response.status_code == 503
+    assert "allowlist" in response.json()["detail"]
+
+
+def test_health_reports_unconfigured_external_integrations():
+    response = client.get("/health")
+    assert response.status_code == 200
+    integrations = response.json()["integrations"]
+    assert response.json()["supported_voices"] == len(client.get("/api/tts/voices").json())
+    assert integrations["narrativ_forge"] == "not_configured"
+    assert integrations["video_rendering"] == "manifest_only"
+
+
+def test_character_write_endpoints_require_admin_key_in_production(monkeypatch, tmp_path):
+    import app.main as main
+
+    original_characters = main.CHARACTERS_FILE.read_text(encoding="utf-8")
+    monkeypatch.setattr(main, "CHARACTERS_FILE", tmp_path / "characters.json")
+    main.CHARACTERS_FILE.write_text(original_characters, encoding="utf-8")
+    payload = {"name": "Protected Character"}
+    with patch.dict("os.environ", {"APP_ENV": "production"}, clear=False):
+        missing_key = client.post("/api/characters", json=payload)
+        assert missing_key.status_code == 503
+        monkeypatch.setenv("API_ADMIN_KEY", "expected-admin-key")
+        invalid_key = client.post(
+            "/api/characters",
+            json=payload,
+            headers={"X-AuraCraft-Admin-Key": "wrong-key"},
+        )
+        assert invalid_key.status_code == 401
+        valid_key = client.post(
+            "/api/characters",
+            json=payload,
+            headers={"X-AuraCraft-Admin-Key": "expected-admin-key"},
+        )
+        assert valid_key.status_code == 200

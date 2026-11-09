@@ -1,19 +1,24 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
+import { clearCustomAssets } from '../utils/customAssetStore';
 import { Settings, Server, CheckCircle2, AlertCircle, RefreshCw, Database, Trash2, Cpu, Globe, Send, ShieldCheck } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
-  const [edgeTtsStatus, setEdgeTtsStatus] = useState<'online' | 'offline'>('online');
+  const [edgeTtsStatus, setEdgeTtsStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [cleared, setCleared] = useState(false);
 
   const checkHealth = async () => {
     setApiStatus('checking');
     try {
-      const res = await fetch((import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/health', { method: 'GET' });
-      if (res.ok) setApiStatus('online');
-      else setApiStatus('offline');
+      const res = await fetch(API_ENDPOINTS.health, { method: 'GET', signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error('Health endpoint returned ' + res.status);
+      const health = await res.json();
+      setApiStatus(health.status === 'healthy' ? 'online' : 'offline');
+      setEdgeTtsStatus(health.integrations?.edge_tts === 'available' ? 'online' : 'offline');
     } catch {
-      setApiStatus('online'); // Server is responding on port 8010
+      setApiStatus('offline');
+      setEdgeTtsStatus('offline');
     }
   };
 
@@ -21,9 +26,12 @@ export const SettingsPage: React.FC = () => {
     checkHealth();
   }, []);
 
-  const handleClearCache = () => {
+  const handleClearCache = async () => {
     if (window.confirm('Clear all custom characters and reset to default factory presets?')) {
+      localStorage.removeItem('auracraft_custom_chars');
       localStorage.removeItem('auracraft_custom_characters');
+      localStorage.removeItem('auracraft_deleted_chars');
+      await clearCustomAssets().catch((error) => console.warn('Unable to clear IndexedDB assets:', error));
       setCleared(true);
       setTimeout(() => setCleared(false), 2500);
       window.location.reload();
@@ -70,11 +78,11 @@ export const SettingsPage: React.FC = () => {
             <div className="bg-[#0a0d14] p-3.5 rounded-xl border border-[#23314f] flex items-center justify-between">
               <div>
                 <strong className="text-slate-200 block">AuraCraft Backend API</strong>
-                <span className="text-[11px] text-slate-500 font-mono">http://localhost:8010</span>
+                <span className="text-[11px] text-slate-500 font-mono">{API_BASE_URL || "API URL not configured"}</span>
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800/40">
-                <CheckCircle2 className="w-3 h-3" />
-                Active (Port 8010)
+              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold ${apiStatus === 'online' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/40' : 'bg-rose-950 text-rose-300 border border-rose-800/40'}`}>
+                {apiStatus === 'online' ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                {apiStatus === 'checking' ? 'Checking' : apiStatus === 'online' ? 'Online' : 'Offline'}
               </span>
             </div>
 
@@ -84,9 +92,8 @@ export const SettingsPage: React.FC = () => {
                 <strong className="text-slate-200 block">Narrativ Forge Bridge</strong>
                 <span className="text-[11px] text-slate-500 font-mono">Standalone Decoupled (JSON Pack Exchanger)</span>
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-purple-950 text-purple-300 border border-purple-800/40">
-                <CheckCircle2 className="w-3 h-3" />
-                Decoupled Clean
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                Not configured
               </span>
             </div>
 
@@ -96,9 +103,9 @@ export const SettingsPage: React.FC = () => {
                 <strong className="text-slate-200 block">Edge-TTS Multilingual Engine</strong>
                 <span className="text-[11px] text-slate-500 font-mono">Burmese &bull; Japanese &bull; English Neural</span>
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800/40">
-                <CheckCircle2 className="w-3 h-3" />
-                Zero-Cost Ready
+              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold ${edgeTtsStatus === 'online' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/40' : 'bg-rose-950 text-rose-300 border border-rose-800/40'}`}>
+                {edgeTtsStatus === 'online' ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                {edgeTtsStatus === 'checking' ? 'Checking' : edgeTtsStatus === 'online' ? 'Available' : 'Unavailable'}
               </span>
             </div>
 
@@ -108,9 +115,8 @@ export const SettingsPage: React.FC = () => {
                 <strong className="text-slate-200 block">The Nexus Hub Telegram Alerts</strong>
                 <span className="text-[11px] text-slate-500 font-mono">@AuraCraftNexusBot &bull; Topic 215</span>
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-950 text-blue-300 border border-blue-800/40">
-                <Send className="w-3 h-3" />
-                Topic 215
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                Configured · not live-checked
               </span>
             </div>
           </div>
@@ -125,17 +131,17 @@ export const SettingsPage: React.FC = () => {
             </h2>
 
             <p className="text-xs text-slate-400 leading-relaxed">
-              Custom characters, personality prompts, and voice pairings created in AuraCraft Studio are stored securely in your browser's persistent local storage.
+              Custom character details are stored in browser LocalStorage; uploaded photos and VRM files are stored in IndexedDB so they can be restored after a refresh.
             </p>
 
             <div className="bg-[#0a0d14] p-4 rounded-xl border border-[#23314f] space-y-2 text-xs">
               <div className="flex justify-between text-slate-400">
-                <span>Storage Key:</span>
-                <span className="text-purple-300 font-mono">auracraft_custom_characters</span>
+                <span>Character Storage:</span>
+                <span className="text-purple-300 font-mono">Studio assets + persona library</span>
               </div>
               <div className="flex justify-between text-slate-400">
                 <span>Persistence Mode:</span>
-                <span className="text-emerald-400 font-semibold">Browser LocalStorage</span>
+                <span className="text-emerald-400 font-semibold">LocalStorage + IndexedDB</span>
               </div>
               <div className="flex justify-between text-slate-400">
                 <span>Microservice Boundary:</span>

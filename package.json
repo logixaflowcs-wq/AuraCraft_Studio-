@@ -13,7 +13,8 @@
     "preview": "npm --prefix apps/web-platform/frontend run preview",
     "dev:backend": "python -m uvicorn app.main:app --app-dir apps/web-platform/backend --port 8010 --reload",
     "test:backend": "pytest apps/web-platform/backend",
-    "deploy:worker": "npx --prefix apps/web-platform/backend/cloudflare_worker wrangler deploy"
+    "deploy:worker": "npx --prefix apps/web-platform/backend/cloudflare_worker wrangler deploy",
+    "test:worker": "node --test apps/web-platform/backend/cloudflare_worker/tests/*.test.mjs"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.3.4",

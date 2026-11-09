@@ -58,7 +58,14 @@ def test_filter_characters_by_style():
         assert c["style"] == "myanmar"
 
 
-def test_create_and_export_character_pack():
+def test_create_and_export_character_pack(monkeypatch, tmp_path):
+    import app.main as main
+
+    # Keep the test from mutating the checked-in character catalogue or exports.
+    original_characters = main.CHARACTERS_FILE.read_text(encoding="utf-8")
+    monkeypatch.setattr(main, "CHARACTERS_FILE", tmp_path / "characters.json")
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    main.CHARACTERS_FILE.write_text(original_characters, encoding="utf-8")
     create_payload = {
         "name": "Kenshiro Unit 01",
         "role": "Cyber Combat Mecha",
