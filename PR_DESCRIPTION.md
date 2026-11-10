@@ -27,10 +27,15 @@ See `AUDIT_FIX_REPORT.md` for the audit-ID-to-file-to-test matrix.
 - Configure `TELEGRAM_WEBHOOK_SECRET` identically in Render and Worker secrets; keep `TELEGRAM_BOT_TOKEN` in Render backend only.
 - Set exact `ALLOWED_ORIGINS` in Render and Worker, `BACKEND_API_URL` in Worker, and `VITE_API_URL` in the Render frontend to the Worker origin.
 - Set `TELEGRAM_IMPORT_ALLOWED_HOSTS` to trusted HTTPS download hosts.
-- The Render backend is configured as Starter with a 1GB `/data` persistent disk. This is a paid Render plan requirement; this PR does not deploy or purchase resources.
+- The Render backend blueprint now targets the Free plan and uses Neon Postgres (DATABASE_URL) for durable character/render-plan data; no paid Render plan or disk is required. Render service environment configuration and deployment are still pending workspace confirmation.
 
 ## Deferred / limitations
 
-- R2 remains an optional commented binding because no R2 bucket is currently used by the application.
+- R2 is not enabled; uploaded custom VRM files in backend temporary storage are not durable on Render Free yet.
 - Legacy browser `blob:` URLs already invalidated by a previous page session cannot be recovered; new uploads persist correctly in IndexedDB.
-- The first GitHub Actions run exposed a duplicate npm workspace name and a vulnerable runner-preinstalled setuptools version; both were corrected in the follow-up commits. A fresh GitHub Actions run is pending.
+- The first GitHub Actions run exposed a duplicate npm workspace name and a vulnerable runner-preinstalled setuptools version; both were corrected. GitHub Actions run #14 passed backend, frontend, and Worker jobs; Worker Lint run #6 passed.
+
+
+## Free-tier follow-up branch
+
+This branch adds Neon Postgres persistence for character records and render manifests, changes the Render blueprint to Free, removes public Telegram identifiers from source defaults/health output, and adds persistence tests. Neon Free project is provisioned in Singapore; Render service environment updates and deployment are not yet performed. Custom VRM file durability, actual MP4 rendering, and Narrativ Forge integration remain open items.
