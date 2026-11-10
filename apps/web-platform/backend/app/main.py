@@ -428,7 +428,7 @@ def health_check():
         "supported_voices": 8,
         "default_language": "my-MM",
         "supported_archetypes": ["anime", "army", "myanmar", "streamer"],
-        "telegram_configured": bool(os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_GROUP_CHAT_ID")),
+        "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_GROUP_CHAT_ID),
     }
 
 
