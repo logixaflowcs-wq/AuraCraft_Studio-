@@ -223,3 +223,176 @@ def test_telegram_get_me_proxy_returns_only_public_bot_identity(monkeypatch):
     result = asyncio.run(main.telegram_bot_test())
     assert result == {"ok": True, "username": "auracraft_test_bot", "first_name": "AuraCraft"}
     assert "token" not in result
+
+
+def test_production_cors_requires_explicit_origins(monkeypatch):
+    import asyncio
+
+    from app import main
+
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setattr(main, "_allowed_origins", [])
+    with pytest.raises(RuntimeError, match="ALLOWED_ORIGINS"):
+        asyncio.run(main.validate_production_configuration())
+
+
+def test_unhandled_exception_response_does_not_leak_details():
+    import asyncio
+
+    from app import main
+    from fastapi.responses import JSONResponse
+    from starlette.requests import Request
+
+    request = Request({"type": "http", "method": "GET", "path": "/secret", "headers": [], "client": ("127.0.0.1", 1), "server": ("test", 80), "scheme": "http", "query_string": b""})
+    try:
+        raise RuntimeError("database-password-must-not-leak")
+    except RuntimeError as error:
+        response = asyncio.run(main.unexpected_error_handler(request, error))
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 500
+    assert b"database-password-must-not-leak" not in response.body
+    assert response.body == b'{"detail":"Internal server error"}'
+
+
+def _make_aura_archive(actor_id="audit_import_test", checksum_override=None, extra_manifest_key=False):
+    import hashlib
+    import io
+    import json
+    import zipfile
+    from datetime import UTC, datetime
+
+    vrm_bytes = b"test-vrm-content"
+    manifest = {
+        "version": "1.0",
+        "characterId": actor_id,
+        "characterName": "Audit Imported Persona",
+        "vrmChecksum": checksum_override or hashlib.sha256(vrm_bytes).hexdigest(),
+        "identityPrompt": "A test persona",
+        "tags": ["audit", "test"],
+        "style": "anime",
+        "exportedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "source": "AuraCraft-Studio-v1",
+    }
+    if extra_manifest_key:
+        manifest["unexpected"] = "reject"
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr("model.vrm", vrm_bytes)
+    return stream.getvalue(), vrm_bytes
+
+
+def test_aura_import_validates_checksum_and_persists_vrm(monkeypatch, tmp_path):
+    from app import main
+
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(main, "DATA_DIR", data_dir)
+    monkeypatch.setattr(main, "CHARACTERS_FILE", data_dir / "characters.json")
+    archive, vrm_bytes = _make_aura_archive()
+
+    result = main._import_aura_archive(archive, [])
+
+    assert result["status"] == "imported"
+    assert (data_dir / "imported_vrms" / "audit_import_test.vrm").read_bytes() == vrm_bytes
+    stored = main.load_characters()
+    assert stored[0]["vrm_model"] == "/api/characters/vrm/audit_import_test"
+
+
+def test_aura_import_rejects_checksum_mismatch(monkeypatch, tmp_path):
+    from app import main
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "CHARACTERS_FILE", tmp_path / "characters.json")
+    archive, _ = _make_aura_archive(checksum_override="0" * 64)
+    with pytest.raises(HTTPException) as error:
+        main._import_aura_archive(archive, [])
+    assert error.value.status_code == 422
+    assert not (tmp_path / "imported_vrms").exists()
+
+
+@pytest.mark.parametrize("actor_id", ["../evil", r"..\\evil", "/absolute/path", "bad\x00id"])
+def test_aura_import_rejects_unsafe_character_ids(actor_id, monkeypatch, tmp_path):
+    from app import main
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "CHARACTERS_FILE", tmp_path / "characters.json")
+    archive, _ = _make_aura_archive(actor_id=actor_id)
+    with pytest.raises(HTTPException) as error:
+        main._import_aura_archive(archive, [])
+    assert error.value.status_code == 422
+
+
+def test_aura_import_rejects_unknown_manifest_keys(monkeypatch, tmp_path):
+    from app import main
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "CHARACTERS_FILE", tmp_path / "characters.json")
+    archive, _ = _make_aura_archive(extra_manifest_key=True)
+    with pytest.raises(HTTPException) as error:
+        main._import_aura_archive(archive, [])
+    assert error.value.status_code == 422
+
+
+def test_aura_import_rejects_unexpected_zip_paths(monkeypatch, tmp_path):
+    import io
+    import zipfile
+
+    from app import main
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "CHARACTERS_FILE", tmp_path / "characters.json")
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("../evil.vrm", b"bad")
+    with pytest.raises(HTTPException) as error:
+        main._import_aura_archive(stream.getvalue(), [])
+    assert error.value.status_code == 422
+
+
+def test_aura_import_rejects_oversized_manifest(monkeypatch, tmp_path):
+    import io
+    import zipfile
+
+    from app import main
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "CHARACTERS_FILE", tmp_path / "characters.json")
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("manifest.json", b"x" * (256 * 1024 + 1))
+        archive.writestr("model.vrm", b"vrm")
+    with pytest.raises(HTTPException) as error:
+        main._import_aura_archive(stream.getvalue(), [])
+    assert error.value.status_code == 413
+
+
+def test_telegram_speech_calls_authenticated_tts_endpoint(monkeypatch):
+    import asyncio
+
+    from app import main
+
+    class FakeResponse:
+        is_success = True
+        content = b"mp3-audio"
+        status_code = 200
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            assert url == "https://backend.example.com/api/tts/synthesize"
+            assert json == {"text": "hello", "voice": "en-US-JennyNeural"}
+            assert headers["Authorization"] == "Bearer server-token"
+            return FakeResponse()
+
+    monkeypatch.setenv("BACKEND_PUBLIC_URL", "https://backend.example.com")
+    monkeypatch.setenv("API_AUTH_TOKEN", "server-token")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeClient)
+    assert asyncio.run(main._synthesize_telegram_audio("hello", "en-US-JennyNeural")) == b"mp3-audio"

@@ -6,6 +6,7 @@ import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm';
 import { lipSync } from '../audio/lipSyncAnalyzer';
 import { Upload, User, Sparkles, RefreshCw, CheckCircle2, RotateCcw, Maximize2, Eye, UserCheck, Camera, Globe } from 'lucide-react';
 import { translations, type Language } from '../utils/i18n';
+import { API_BASE_URL } from '../config/api';
 
 // FIX(audit-3-C): enable Three.js resource caching so repeated VRM URLs reuse fetched assets.
 THREE.Cache.enabled = true;
@@ -318,7 +319,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     };
 
     if (typeof source === 'string') {
-      loader.load(source, onLoad, undefined, onError);
+      // FIX(audit-2-B): imported VRM API paths must resolve through the edge gateway, not the static-site origin.
+      const resolvedSource = typeof source === 'string' && source.startsWith('/api/')
+        ? API_BASE_URL + source
+        : source;
+      loader.load(resolvedSource, onLoad, undefined, onError);
     } else {
       loader.parse(source, '', onLoad, onError);
     }

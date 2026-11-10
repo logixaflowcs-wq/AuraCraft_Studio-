@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import html
 import io
@@ -12,6 +13,7 @@ import shutil
 import tempfile
 import threading
 import time
+import zipfile
 from collections import defaultdict, deque
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +31,7 @@ except ImportError:
     pass
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from filelock import FileLock
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -540,29 +542,152 @@ async def _generate_tts_audio(text: str, voice: str) -> bytes:
     return audio
 
 
-async def _download_persona_pack(url: str) -> ManualPersonaPack:
-    # FIX(audit-2-B): require HTTPS and an explicit host allowlist to prevent SSRF.
+async def _synthesize_telegram_audio(text: str, voice: str) -> bytes:
+    # FIX(audit-2-B): production Telegram speech uses the authenticated POST /api/tts/synthesize endpoint.
+    base_url = os.getenv("BACKEND_PUBLIC_URL", "").rstrip("/")
+    api_token = os.getenv("API_AUTH_TOKEN", "").strip()
+    if base_url and api_token:
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(
+                    f"{base_url}/api/tts/synthesize",
+                    json={"text": text, "voice": voice},
+                    headers={"Authorization": f"Bearer {api_token}"},
+                )
+            if not response.is_success or not response.content:
+                logger.error("Telegram TTS endpoint returned HTTP %s", response.status_code)
+                raise HTTPException(status_code=502, detail="TTS synthesis failed")
+            return response.content
+        except httpx.HTTPError:
+            logger.exception("Telegram TTS endpoint request failed")
+            raise HTTPException(status_code=502, detail="TTS synthesis failed")
+    if _production_mode():
+        raise HTTPException(status_code=503, detail="TTS endpoint configuration is missing")
+    return await _generate_tts_audio(text, voice)
+
+
+async def _download_persona_pack(url: str) -> bytes:
+    # FIX(audit-2-B): HTTPS allowlisting, no redirects, and a compressed download cap prevent SSRF and oversized imports.
     parsed = urlsplit(url)
     allowed_hosts = {host.strip().lower() for host in os.getenv("TELEGRAM_IMPORT_ALLOWED_HOSTS", "").split(",") if host.strip()}
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443):
         raise HTTPException(status_code=422, detail="Import URL must be a valid HTTPS URL")
     if parsed.hostname.lower() not in allowed_hosts:
         raise HTTPException(status_code=403, detail="Import host is not allowed")
-    async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client, client.stream("GET", url) as response:
-        if not response.is_success:
-            raise HTTPException(status_code=502, detail="Persona pack download failed")
-        length = int(response.headers.get("Content-Length", "0") or 0)
-        if length > 2 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Persona pack exceeds 2MB")
-        chunks = bytearray()
-        async for chunk in response.aiter_bytes():
-            chunks.extend(chunk)
-            if len(chunks) > 2 * 1024 * 1024:
-                raise HTTPException(status_code=413, detail="Persona pack exceeds 2MB")
+    max_download_bytes = 120 * 1024 * 1024
     try:
-        return ManualPersonaPack.model_validate(json.loads(chunks))
-    except (json.JSONDecodeError, ValidationError):
-        raise HTTPException(status_code=422, detail="Downloaded file is not a valid JSON persona pack")
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client, client.stream("GET", url) as response:
+            if not response.is_success:
+                raise HTTPException(status_code=502, detail="Persona pack download failed")
+            length = int(response.headers.get("Content-Length", "0") or 0)
+            if length > max_download_bytes:
+                raise HTTPException(status_code=413, detail="Persona package exceeds download limit")
+            chunks = bytearray()
+            async for chunk in response.aiter_bytes():
+                chunks.extend(chunk)
+                if len(chunks) > max_download_bytes:
+                    raise HTTPException(status_code=413, detail="Persona package exceeds download limit")
+            return bytes(chunks)
+    except HTTPException:
+        raise
+    except httpx.HTTPError:
+        logger.exception("Persona package download failed")
+        raise HTTPException(status_code=502, detail="Persona pack download failed")
+
+
+def _import_aura_archive(archive_bytes: bytes, chars: list[dict[str, Any]]) -> dict[str, Any]:
+    # FIX(audit-1-I): validate ZIP expansion, strict manifest fields, and VRM checksum before writing any asset.
+    if len(archive_bytes) > 120 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Aura package exceeds compressed size limit")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos if not info.is_dir()]
+            allowed_names = {"manifest.json", "model.vrm", "thumbnail.png", "reference-sheet.png"}
+            if len(names) != len(set(names)) or any(name not in allowed_names for name in names):
+                raise HTTPException(status_code=422, detail="Aura package contains unsupported entries")
+            if "manifest.json" not in names or "model.vrm" not in names:
+                raise HTTPException(status_code=422, detail="Aura package is missing required files")
+            sizes = {info.filename: info.file_size for info in infos if not info.is_dir()}
+            if sum(sizes.values()) > 200 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Aura package exceeds expanded size limit")
+            if sizes["manifest.json"] > 256 * 1024:
+                raise HTTPException(status_code=413, detail="Aura manifest exceeds 256KB")
+            if sizes["model.vrm"] <= 0 or sizes["model.vrm"] > 100 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="VRM file exceeds 100MB limit")
+            for image_name in ("thumbnail.png", "reference-sheet.png"):
+                if sizes.get(image_name, 0) > 5 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="Image asset exceeds 5MB limit")
+            manifest = json.loads(archive.read("manifest.json"))
+            required_keys = {"version", "characterId", "characterName", "vrmChecksum", "identityPrompt", "tags", "style", "exportedAt", "source"}
+            if not isinstance(manifest, dict) or set(manifest) != required_keys:
+                raise HTTPException(status_code=422, detail="Aura manifest schema is invalid")
+            if manifest["version"] != "1.0" or manifest["source"] != "AuraCraft-Studio-v1":
+                raise HTTPException(status_code=422, detail="Unsupported Aura package version")
+            actor_id = manifest["characterId"]
+            actor_name = manifest["characterName"]
+            if not isinstance(actor_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
+                raise HTTPException(status_code=422, detail="Invalid actor_id")
+            if not isinstance(actor_name, str) or not actor_name.strip() or len(actor_name) > 200:
+                raise HTTPException(status_code=422, detail="Invalid character name")
+            checksum = manifest["vrmChecksum"]
+            if not isinstance(checksum, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", checksum):
+                raise HTTPException(status_code=422, detail="Aura VRM checksum is required")
+            if not isinstance(manifest["identityPrompt"], str) or len(manifest["identityPrompt"]) > 10000:
+                raise HTTPException(status_code=422, detail="Aura identity prompt is invalid")
+            if not isinstance(manifest["tags"], list) or len(manifest["tags"]) > 100 or any(not isinstance(tag, str) or len(tag) > 100 for tag in manifest["tags"]):
+                raise HTTPException(status_code=422, detail="Aura tags are invalid")
+            if not isinstance(manifest["style"], str) or manifest["style"] not in {"anime", "realistic", "myanmar", "army", "custom"}:
+                raise HTTPException(status_code=422, detail="Aura style is invalid")
+            if not isinstance(manifest["exportedAt"], str):
+                raise HTTPException(status_code=422, detail="Aura export timestamp is invalid")
+            try:
+                datetime.fromisoformat(manifest["exportedAt"])
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Aura export timestamp is invalid")
+            vrm_bytes = archive.read("model.vrm")
+            actual_checksum = hashlib.sha256(vrm_bytes).hexdigest()
+            if not hmac.compare_digest(actual_checksum.lower(), checksum.lower()):
+                raise HTTPException(status_code=422, detail="Aura VRM checksum mismatch")
+            if any(str(item.get("id")) == actor_id for item in chars):
+                return {"status": "exists", "actor_id": actor_id, "actor_name": actor_name}
+            asset_dir = DATA_DIR / "imported_vrms"
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            target = (asset_dir / f"{actor_id}.vrm").resolve()
+            if os.path.commonpath((str(asset_dir.resolve()), str(target))) != str(asset_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid VRM storage path")
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile("wb", dir=asset_dir, prefix=".vrm-", suffix=".tmp", delete=False) as handle:
+                    temp_path = handle.name
+                    handle.write(vrm_bytes)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp_path, target)
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            character = {
+                "id": actor_id,
+                "name": actor_name.strip(),
+                "role": "Imported Aura Character",
+                "style": manifest["style"],
+                "voice_id": "my-MM-NilarNeural",
+                "language": "my-MM",
+                "personality": manifest["identityPrompt"],
+                "vrm_model": f"/api/characters/vrm/{actor_id}",
+                "default_emotion": "neutral",
+                "avatar_color": "#8b5cf6",
+                "tags": manifest["tags"],
+            }
+            chars.append(character)
+            save_characters(chars)
+            return {"status": "imported", "actor_id": actor_id, "actor_name": actor_name}
+    except HTTPException:
+        raise
+    except (zipfile.BadZipFile, json.JSONDecodeError, KeyError, OSError):
+        logger.exception("Aura archive validation failed")
+        raise HTTPException(status_code=422, detail="Aura package is invalid")
 
 
 @app.on_event("startup")
@@ -631,7 +756,9 @@ async def telegram_webhook(
     user_id = message.get("from", {}).get("id")
     if _production_mode() and not allowed_users:
         raise HTTPException(status_code=503, detail="Telegram user allowlist is not configured")
-    if allowed_users and str(user_id) not in allowed_users:
+    # FIX(audit-1-H): compare Telegram allowlisted user IDs without early-exit string equality.
+    user_id_text = str(user_id)
+    if allowed_users and not any(hmac.compare_digest(user_id_text, allowed_id) for allowed_id in allowed_users):
         return {"ok": True, "ignored": "unauthorized_user"}
 
     text = message.get("text", "").strip()
@@ -726,14 +853,24 @@ async def telegram_webhook(
             reply_text = "⚠️ Usage: /import <https://allowed-host/path/persona.json>"
         else:
             try:
-                pack = await _download_persona_pack(import_url)
+                package_bytes = await _download_persona_pack(import_url)
                 chars = load_characters()
-                imported = _import_persona_pack(pack, chars)
-                if imported["status"] == "imported":
-                    save_characters(chars)
-                    reply_text = f"✅ Imported <b>{html.escape(pack.actor_name)}</b>."
+                if package_bytes.startswith(b"PK\x03\x04"):
+                    imported = _import_aura_archive(package_bytes, chars)
                 else:
-                    reply_text = f"ℹ️ Character <code>{html.escape(pack.actor_id)}</code> already exists."
+                    if len(package_bytes) > 2 * 1024 * 1024:
+                        raise HTTPException(status_code=413, detail="JSON persona pack exceeds 2MB")
+                    try:
+                        pack = ManualPersonaPack.model_validate(json.loads(package_bytes))
+                    except (json.JSONDecodeError, ValidationError):
+                        raise HTTPException(status_code=422, detail="Downloaded file is not a valid persona pack")
+                    imported = _import_persona_pack(pack, chars)
+                    if imported["status"] == "imported":
+                        save_characters(chars)
+                if imported["status"] == "imported":
+                    reply_text = f"✅ Imported <b>{html.escape(str(imported.get('actor_name', imported.get('actor_id'))))}</b>."
+                else:
+                    reply_text = f"ℹ️ Character <code>{html.escape(str(imported.get('actor_id', 'unknown')))}</code> already exists."
             except HTTPException as error:
                 reply_text = f"❌ {html.escape(str(error.detail))}"
 
@@ -742,7 +879,7 @@ async def telegram_webhook(
         audio_file_id = None
         document_file_id = None
         if audio_request:
-            audio_file_id = await send_telegram_audio(target_chat, topic_id, await _generate_tts_audio(*audio_request))
+            audio_file_id = await send_telegram_audio(target_chat, topic_id, await _synthesize_telegram_audio(*audio_request))
             if not audio_file_id:
                 raise HTTPException(status_code=502, detail="Telegram audio delivery failed")
         if document_request:
@@ -917,6 +1054,18 @@ def get_archetypes():
     for s in styles:
         s["count"] = sum(1 for c in chars if c.get("style") == s["id"])
     return styles
+
+
+@app.get("/api/characters/vrm/{actor_id}")
+def get_imported_vrm(actor_id: str):
+    # FIX(audit-2-B): serve imported VRM assets only from the validated persistent asset directory.
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
+        raise HTTPException(status_code=404, detail="VRM asset not found")
+    asset_dir = (DATA_DIR / "imported_vrms").resolve()
+    asset_path = (asset_dir / f"{actor_id}.vrm").resolve()
+    if os.path.commonpath((str(asset_dir), str(asset_path))) != str(asset_dir) or not asset_path.is_file():
+        raise HTTPException(status_code=404, detail="VRM asset not found")
+    return FileResponse(asset_path, media_type="model/gltf-binary", filename=f"{actor_id}.vrm")
 
 
 @app.get("/api/characters")
