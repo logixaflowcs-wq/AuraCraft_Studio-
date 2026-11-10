@@ -3,10 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "description": "AuraCraft Studio: Real-Time 3D VRM Virtual Persona & Autonomous Neural Voice Studio",
-  "workspaces": [
-    "apps/web-platform/*",
-    "apps/*"
-  ],
   "scripts": {
     "dev": "npm --prefix apps/web-platform/frontend run dev",
     "build": "npm --prefix apps/web-platform/frontend run build",
