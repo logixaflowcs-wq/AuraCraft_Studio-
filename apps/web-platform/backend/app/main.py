@@ -428,8 +428,7 @@ def health_check():
         "supported_voices": 8,
         "default_language": "my-MM",
         "supported_archetypes": ["anime", "army", "myanmar", "streamer"],
-        "telegram_topic": 215,
-        "telegram_chat_id": "-1003992125718",
+        "telegram_configured": bool(os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_GROUP_CHAT_ID")),
     }
 
 
@@ -474,8 +473,9 @@ async def readiness_check():
 
 
 # Telegram Webhook & Topic 215 Policy
-TELEGRAM_TOPIC_ID = int(os.getenv("TELEGRAM_TOPIC_ID", "215"))
-TELEGRAM_GROUP_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1003992125718")
+# FIX(free-tier-2): keep private Telegram group/topic identifiers out of the public repository.
+TELEGRAM_TOPIC_ID = int(os.getenv("TELEGRAM_TOPIC_ID", "0"))
+TELEGRAM_GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID", os.getenv("TELEGRAM_CHAT_ID", "")).strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
 
