@@ -48,6 +48,5 @@ services:
     staticPublishPath: dist
     rootDir: apps/web-platform/frontend
     envVars:
-      # Set this to the deployed Cloudflare Worker origin in the Render dashboard.
       - key: VITE_API_URL
-        sync: false
+        value: https://auracraft-studio-telegram-worker.auracraftstudio.workers.dev
