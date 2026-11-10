@@ -33,4 +33,4 @@ See `AUDIT_FIX_REPORT.md` for the audit-ID-to-file-to-test matrix.
 
 - R2 remains an optional commented binding because no R2 bucket is currently used by the application.
 - Legacy browser `blob:` URLs already invalidated by a previous page session cannot be recovered; new uploads persist correctly in IndexedDB.
-- GitHub Actions will execute after this PR is opened; the equivalent checks have passed locally.
+- The first GitHub Actions run exposed a duplicate npm workspace name and a vulnerable runner-preinstalled setuptools version; both were corrected in the follow-up commits. A fresh GitHub Actions run is pending.
