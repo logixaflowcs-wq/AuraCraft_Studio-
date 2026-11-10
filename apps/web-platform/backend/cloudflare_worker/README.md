@@ -60,3 +60,7 @@ Use Telegram's Bot API with the same two private values; do not place either cre
 ```
 
 You are all set! AuraCraft Studio Bot will now respond inside Topic #215 at zero cost.
+
+## Webhook gateway configuration
+
+Set `BACKEND_API_URL` to the HTTPS origin of the FastAPI deployment. The Worker validates the Telegram webhook secret and forwards the original update to `/api/telegram/webhook`; FastAPI is the only command processor and owns the Telegram bot token. Do not register both Worker and FastAPI as separate Telegram webhook destinations.

@@ -112,3 +112,9 @@ npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler deploy
 ```
+
+## Telegram webhook architecture (audit hardening)
+
+Cloudflare Worker is the public Telegram webhook edge gateway. It validates the Telegram webhook secret and request size, then forwards the update to the single canonical FastAPI handler at `/api/telegram/webhook` using `BACKEND_API_URL`. Do not configure Telegram to deliver the same bot updates directly to both services; that would duplicate replies. Configure `TELEGRAM_WEBHOOK_SECRET` as a Worker secret and set `BACKEND_API_URL` to the HTTPS origin of the deployed FastAPI service. Keep `TELEGRAM_BOT_TOKEN` only in the backend environment.
+
+The backend `/speak` and `/voice` commands synthesize real Edge-TTS audio and deliver it with Telegram `sendAudio`; `/export` sends the generated JSON persona pack as a Telegram document. `/import` downloads a JSON `ManualPersonaPack` only from hosts listed in the backend `TELEGRAM_IMPORT_ALLOWED_HOSTS` comma-separated environment variable. The current backend data model does not accept `.aura` ZIP/VRM uploads over this command, so `.aura` imports remain a browser Library workflow.

@@ -42,3 +42,30 @@ test("worker rejects declared and actual oversized bodies", async () => {
   }), { TELEGRAM_WEBHOOK_SECRET: "test-secret" }, { waitUntil() {} });
   assert.equal(actual.status, 413);
 });
+
+test("worker forwards updates to the canonical FastAPI webhook", async () => {
+  const originalFetch = globalThis.fetch;
+  let forwarded;
+  globalThis.fetch = async (url, init) => {
+    forwarded = { url: String(url), init };
+    return Response.json({ ok: true, action: "status" });
+  };
+  try {
+    const body = JSON.stringify({ message: { text: "/status" } });
+    const response = await worker.fetch(new Request("https://worker.example/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "test-secret" },
+      body,
+    }), {
+      TELEGRAM_WEBHOOK_SECRET: "test-secret",
+      BACKEND_API_URL: "https://api.example.com",
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, action: "status" });
+    assert.equal(forwarded.url, "https://api.example.com/api/telegram/webhook");
+    assert.equal(forwarded.init.headers["X-Telegram-Bot-Api-Secret-Token"], "test-secret");
+    assert.equal(forwarded.init.body, body);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

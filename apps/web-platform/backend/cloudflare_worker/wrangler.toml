@@ -19,3 +19,6 @@ TELEGRAM_ALLOWED_USER_IDS = "1686310706,6759217947"
 # - TELEGRAM_BOT_TOKEN
 # - TELEGRAM_WEBHOOK_SECRET
 # - FRONTEND_BASE_URL (only set after the deployed dashboard returns HTTP 200)
+
+# Set this to the HTTPS origin of the FastAPI service before deployment.
+# BACKEND_API_URL = "https://your-backend.example.com"

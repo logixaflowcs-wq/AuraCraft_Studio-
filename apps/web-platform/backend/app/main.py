@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import html
 import io
@@ -7,6 +8,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 import threading
 import time
@@ -14,6 +16,7 @@ from collections import defaultdict, deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import edge_tts
@@ -27,7 +30,8 @@ except ImportError:
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from filelock import FileLock
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +95,8 @@ async def unexpected_error_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# FIX(audit-2-A): allow persistent hosting volumes to own all runtime state.
+DATA_DIR = Path(os.getenv("AURACRAFT_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))).resolve()
 CHARACTERS_FILE = DATA_DIR / "characters.json"
 RENDER_PLAN_DIR = DATA_DIR / "render_plans"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -250,20 +255,65 @@ DEFAULT_CHARACTERS = [
     }
 ]
 
-def load_characters() -> list[dict[str, Any]]:
-    if not CHARACTERS_FILE.exists():
-        with open(CHARACTERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(DEFAULT_CHARACTERS, f, indent=2, ensure_ascii=False)
-        return DEFAULT_CHARACTERS
+class CharacterRecord(BaseModel):
+    # FIX(audit-2-A): validate required fields while retaining forward-compatible metadata.
+    model_config = ConfigDict(extra="allow")
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=200)
+    role: str = "Virtual Actor"
+    style: str = "custom"
+    voice_id: str = "my-MM-NilarNeural"
+    language: str = "my-MM"
+    personality: str = "Enthusiastic and polite"
+    vrm_model: str = "/models/sample_avatar_a.vrm"
+    default_emotion: str = "neutral"
+    avatar_color: str = "#8b5cf6"
+    tags: list[str] = Field(default_factory=list)
+
+
+_character_records = TypeAdapter(list[CharacterRecord])
+
+
+def _atomic_write_characters(data: list[dict[str, Any]]) -> None:
+    validated = [item.model_dump(mode="json") for item in _character_records.validate_python(data)]
+    temp_path: str | None = None
     try:
-        with open(CHARACTERS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError, TypeError):
-        return DEFAULT_CHARACTERS
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=DATA_DIR, prefix=".characters-", suffix=".tmp", delete=False) as handle:
+            temp_path = handle.name
+            json.dump(validated, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, CHARACTERS_FILE)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def load_characters() -> list[dict[str, Any]]:
+    # FIX(audit-2-A): serialize reads, corruption recovery, and default initialization across workers.
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(CHARACTERS_FILE) + ".lock"):
+        if not CHARACTERS_FILE.exists():
+            _atomic_write_characters(DEFAULT_CHARACTERS)
+            return DEFAULT_CHARACTERS
+        try:
+            with CHARACTERS_FILE.open("r", encoding="utf-8") as handle:
+                raw_data = json.load(handle)
+            return [item.model_dump(mode="json") for item in _character_records.validate_python(raw_data)]
+        except (OSError, json.JSONDecodeError, ValidationError, TypeError):
+            backup = DATA_DIR / f"characters.corrupt.{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}.json"
+            # Preserve the damaged source before restoring defaults; never silently discard it.
+            shutil.copy2(CHARACTERS_FILE, backup)
+            logger.exception("Character store was corrupt; backup created at %s", backup)
+            _atomic_write_characters(DEFAULT_CHARACTERS)
+            return DEFAULT_CHARACTERS
+
 
 def save_characters(data: list[dict[str, Any]]) -> None:
-    with open(CHARACTERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    # FIX(audit-2-A): validate and atomically replace the JSON store under an inter-process lock.
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(CHARACTERS_FILE) + ".lock"):
+        _atomic_write_characters(data)
 
 
 # Pydantic Schemas
@@ -330,6 +380,7 @@ class ManualPersonaPackBatch(BaseModel):
 
 @app.get("/health")
 def health_check():
+    # FIX(audit-2-C): this endpoint is liveness only and must not depend on downstream services.
     return {
         "status": "healthy",
         "service": "AuraCraft Studio Backend",
@@ -339,6 +390,22 @@ def health_check():
         "telegram_topic": 215,
         "telegram_chat_id": "-1003992125718",
     }
+
+
+@app.get("/ready")
+async def readiness_check():
+    # FIX(audit-2-C): readiness checks durable storage access and an actual Edge-TTS voice-list call.
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if not os.access(DATA_DIR, os.R_OK | os.W_OK):
+            raise OSError("data directory is not accessible")
+        if CHARACTERS_FILE.exists() and not os.access(CHARACTERS_FILE, os.R_OK | os.W_OK):
+            raise OSError("character store is not accessible")
+        await asyncio.wait_for(edge_tts.list_voices(), timeout=5)
+    except Exception:
+        logger.exception("Readiness check failed")
+        raise HTTPException(status_code=503, detail="Service not ready")
+    return {"status": "ready", "storage": "available", "tts": "available"}
 
 
 # Telegram Webhook & Topic 215 Policy
@@ -371,10 +438,98 @@ async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
-            return resp.status_code == 200
+            if not resp.is_success:
+                logger.error("Telegram sendMessage returned HTTP %s", resp.status_code)
+                return False
+            return bool(resp.json().get("ok"))
     except httpx.HTTPError:
         logger.exception("Telegram webhook delivery failed")
         return False
+
+
+async def send_telegram_audio(chat_id: Any, thread_id: Any, audio_bytes: bytes) -> str | None:
+    # FIX(audit-2-B): deliver generated Edge-TTS bytes through Telegram sendAudio and return its file_id.
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    if not token:
+        return None
+    url = f"https://api.telegram.org/bot{token}/sendAudio"
+    data = {"chat_id": str(chat_id), "message_thread_id": str(thread_id)}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                url,
+                data=data,
+                files={"audio": ("auracraft-speech.mp3", audio_bytes, "audio/mpeg")},
+            )
+        payload = response.json()
+        if not response.is_success or not payload.get("ok"):
+            logger.error("Telegram sendAudio failed with HTTP %s", response.status_code)
+            return None
+        return payload.get("result", {}).get("audio", {}).get("file_id")
+    except (httpx.HTTPError, ValueError):
+        logger.exception("Telegram audio delivery failed")
+        return None
+
+
+async def send_telegram_document(chat_id: Any, thread_id: Any, filename: str, content: bytes) -> str | None:
+    # FIX(audit-2-B): export the actual backend persona pack as a Telegram document.
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    if not token:
+        return None
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                url,
+                data={"chat_id": str(chat_id), "message_thread_id": str(thread_id)},
+                files={"document": (filename, content, "application/json")},
+            )
+        payload = response.json()
+        if not response.is_success or not payload.get("ok"):
+            logger.error("Telegram sendDocument failed with HTTP %s", response.status_code)
+            return None
+        return payload.get("result", {}).get("document", {}).get("file_id")
+    except (httpx.HTTPError, ValueError):
+        logger.exception("Telegram document delivery failed")
+        return None
+
+
+async def _generate_tts_audio(text: str, voice: str) -> bytes:
+    # FIX(audit-2-B): share the real Edge-TTS generation path between HTTP and Telegram callers.
+    communicate = edge_tts.Communicate(text=text, voice=voice)
+    stream = io.BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            stream.write(chunk["data"])
+    audio = stream.getvalue()
+    if not audio:
+        raise HTTPException(status_code=502, detail="TTS synthesis failed")
+    return audio
+
+
+async def _download_persona_pack(url: str) -> ManualPersonaPack:
+    # FIX(audit-2-B): require HTTPS and an explicit host allowlist to prevent SSRF.
+    parsed = urlsplit(url)
+    allowed_hosts = {host.strip().lower() for host in os.getenv("TELEGRAM_IMPORT_ALLOWED_HOSTS", "").split(",") if host.strip()}
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise HTTPException(status_code=422, detail="Import URL must be a valid HTTPS URL")
+    if parsed.hostname.lower() not in allowed_hosts:
+        raise HTTPException(status_code=403, detail="Import host is not allowed")
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client, client.stream("GET", url) as response:
+        if not response.is_success:
+            raise HTTPException(status_code=502, detail="Persona pack download failed")
+        length = int(response.headers.get("Content-Length", "0") or 0)
+        if length > 2 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Persona pack exceeds 2MB")
+        chunks = bytearray()
+        async for chunk in response.aiter_bytes():
+            chunks.extend(chunk)
+            if len(chunks) > 2 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Persona pack exceeds 2MB")
+    try:
+        return ManualPersonaPack.model_validate(json.loads(chunks))
+    except (json.JSONDecodeError, ValidationError):
+        raise HTTPException(status_code=422, detail="Downloaded file is not a valid JSON persona pack")
 
 
 @app.on_event("startup")
@@ -393,6 +548,7 @@ async def register_telegram_commands_on_startup():
         {"command": "voice", "description": "Preview actor voice: /voice <char_id> <text>"},
         {"command": "render", "description": "Generate multi-scene video plan: /render <script>"},
         {"command": "export", "description": "Export persona pack: /export <char_id>"},
+        {"command": "import", "description": "Import an allowed-host JSON persona pack: /import <url>"},
     ]
     payload: dict[str, Any] = {"commands": commands}
     if chat_id:
@@ -451,6 +607,8 @@ async def telegram_webhook(
     reply_text = ""
     action_type = ""
     extra: dict[str, Any] = {}
+    audio_request: tuple[str, str] | None = None
+    document_request: tuple[str, bytes] | None = None
 
     if command in {"/start", "/help", "/commands"}:
         action_type = "help"
@@ -479,7 +637,8 @@ async def telegram_webhook(
         if not speak_text:
             reply_text = "⚠️ Usage: /speak <text to say>"
         else:
-            reply_text = f"🎙️ <b>Speech Queued:</b> {html.escape(speak_text[:120])}\nVoice: <code>my-MM-NilarNeural</code>\nStatus: Synthesized zero-cost Edge-TTS"
+            audio_request = (speak_text, "my-MM-NilarNeural")
+            reply_text = f"🎙️ <b>Generating speech:</b> {html.escape(speak_text[:120])}\nVoice: <code>my-MM-NilarNeural</code>"
     elif command == "/voice":
         action_type = "voice"
         _, _, voice_request = text.partition(" ")
@@ -493,6 +652,7 @@ async def telegram_webhook(
             else:
                 extra["character_id"] = character_id
                 extra["voice_id"] = character["voice_id"]
+                audio_request = (speak_text.strip(), character["voice_id"])
                 reply_text = f"🎙️ <b>{html.escape(str(character['name']))}</b>\nVoice: <code>{html.escape(str(character['voice_id']))}</code>\nText: {html.escape(speak_text.strip()[:100])}"
     elif command == "/render":
         action_type = "render"
@@ -517,12 +677,48 @@ async def telegram_webhook(
         if not char_id:
             reply_text = "⚠️ Usage: /export <character_id>"
         else:
-            reply_text = f"📦 Standalone JSON persona pack ready for <code>{html.escape(char_id)}</code>.\nDownload it from AuraCraft Studio: <code>/api/characters/{char_id}/download-pack</code>"
+            try:
+                export_result = export_character_pack(PersonaPackExportRequest(character_id=char_id), None)
+                document_request = (
+                    f"{char_id}_auracraft_pack.json",
+                    json.dumps(export_result["persona_pack"], ensure_ascii=False, indent=2).encode("utf-8"),
+                )
+                reply_text = f"📦 Exported persona pack for <code>{html.escape(char_id)}</code>."
+            except HTTPException as error:
+                reply_text = f"❌ {html.escape(str(error.detail))}"
+    elif command == "/import":
+        action_type = "import"
+        import_url = text.partition(" ")[2].strip()
+        if not import_url:
+            reply_text = "⚠️ Usage: /import <https://allowed-host/path/persona.json>"
+        else:
+            try:
+                pack = await _download_persona_pack(import_url)
+                chars = load_characters()
+                imported = _import_persona_pack(pack, chars)
+                if imported["status"] == "imported":
+                    save_characters(chars)
+                    reply_text = f"✅ Imported <b>{html.escape(pack.actor_name)}</b>."
+                else:
+                    reply_text = f"ℹ️ Character <code>{html.escape(pack.actor_id)}</code> already exists."
+            except HTTPException as error:
+                reply_text = f"❌ {html.escape(str(error.detail))}"
 
     if reply_text:
         target_chat = message.get("chat", {}).get("id") or TELEGRAM_GROUP_CHAT_ID
+        audio_file_id = None
+        document_file_id = None
+        if audio_request:
+            audio_file_id = await send_telegram_audio(target_chat, topic_id, await _generate_tts_audio(*audio_request))
+            if not audio_file_id:
+                raise HTTPException(status_code=502, detail="Telegram audio delivery failed")
+        if document_request:
+            document_file_id = await send_telegram_document(target_chat, topic_id, *document_request)
+            if not document_file_id:
+                raise HTTPException(status_code=502, detail="Telegram export delivery failed")
         delivered = await send_telegram_reply(chat_id=target_chat, thread_id=topic_id, text=reply_text)
-        return {"ok": True, "action": action_type, "reply": reply_text, "delivered": delivered, **extra}
+        return {"ok": True, "action": action_type, "reply": reply_text, "delivered": delivered,
+                "audio_file_id": audio_file_id, "document_file_id": document_file_id, **extra}
 
     return {"ok": True, "ignored": "unhandled_command"}
 
@@ -555,10 +751,9 @@ async def synthesize_speech(payload: SynthesizeRequest, request: Request, _: Non
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 audio_stream.write(chunk["data"])
-        
         audio_bytes = audio_stream.getvalue()
         if not audio_bytes:
-            raise HTTPException(status_code=500, detail="TTS generation produced empty audio")
+            raise HTTPException(status_code=502, detail="TTS synthesis failed")
             
         return Response(
             content=audio_bytes,
