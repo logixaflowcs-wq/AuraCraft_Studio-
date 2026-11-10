@@ -85,7 +85,7 @@ def test_postgres_render_plan_lifecycle(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_production_configuration_requires_database_when_enabled(monkeypatch):
-    monkeypatch.setattr(main, "_production_mode", lambda: True)
+    monkeypatch.setattr(main, "_allowed_origins", ["https://example.test"])
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ALLOWED_ORIGINS", "https://example.test")
     monkeypatch.setenv("REQUIRE_DATABASE_URL", "true")
