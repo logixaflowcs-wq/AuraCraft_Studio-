@@ -79,3 +79,15 @@ def test_postgres_render_plan_lifecycle(monkeypatch):
     deleted = main.delete_avatar_video_render_plan(plan["plan_id"], None)
     assert deleted["status"] == "deleted"
     assert key not in state
+
+
+@pytest.mark.asyncio
+async def test_production_configuration_requires_database_when_enabled(monkeypatch):
+    monkeypatch.setattr(main, "_production_mode", lambda: True)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://example.test")
+    monkeypatch.setenv("REQUIRE_DATABASE_URL", "true")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="DATABASE_URL must be configured"):
+        await main.validate_production_configuration()
