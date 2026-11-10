@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
-
 from app import main
+
+import pytest
 
 
 def test_postgres_character_store_initializes_and_saves(monkeypatch):
