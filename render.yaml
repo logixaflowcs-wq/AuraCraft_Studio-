@@ -16,6 +16,8 @@ services:
         value: /tmp/auracraft-data
       - key: DATABASE_URL
         sync: false
+      - key: REQUIRE_DATABASE_URL
+        value: "true"
       - key: BACKEND_PUBLIC_URL
         value: https://auracraft-backend-dt1u.onrender.com
       - key: ALLOWED_ORIGINS
