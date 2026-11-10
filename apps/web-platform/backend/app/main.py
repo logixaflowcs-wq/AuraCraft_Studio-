@@ -67,6 +67,9 @@ async def validate_production_configuration():
     environment = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "").lower()
     if environment in {"production", "prod"} and not _allowed_origins:
         raise RuntimeError("ALLOWED_ORIGINS must be configured in production")
+    # FIX(free-tier-3): fail fast instead of silently falling back to ephemeral files on Render Free.
+    if os.getenv("REQUIRE_DATABASE_URL", "").strip().lower() in {"1", "true", "yes"} and not database_enabled():
+        raise RuntimeError("DATABASE_URL must be configured for durable production storage")
 
 
 # FIX(audit-1-B): protect write APIs with a constant-time checked bearer token.
