@@ -1,41 +1,38 @@
-# PR: Complete AuraCraft Studio security and reliability audit fixes
+# PR: Free-tier production readiness and persistence hardening
 
-**Base:** `main`  
-**Head:** `audit/fix-all-20261110`
+**Base:** main  
+**Head:** free-tier/production-readiness-20261110
 
 ## Summary
 
-This PR implements the requested four-phase audit remediation in phase-separated commits; Phase 2 includes a follow-up commit for the completed Aura/VRM integration:
-
-1. **Security:** API Bearer authentication, explicit CORS allowlists, TTS rate limiting, safe path handling and atomic exports, generic error responses, Telegram HTML escaping, constant-time secret/user-ID comparisons, Worker body validation, and strict package import/export validation.
-2. **Backend reliability:** validated/locked/atomic character storage with corruption backups, readiness checks, and a single Telegram command path behind the Cloudflare edge gateway. Telegram speech, import, and export now perform real backend work and deliver actual audio/document results.
-3. **Frontend reliability:** IndexedDB Blob storage and reset behavior, object-URL lifecycle management, AudioContext reconnection, mount-only Three.js scene lifecycle, selected character/voice mapping, correct VoiceLab rate/pitch, OBS URL parameters, real health/Telegram tests, and Pollinations privacy disclosure.
-4. **Infrastructure:** pinned Python and Wrangler dependencies, Worker configuration and dry-run CI, persistent Render disk configuration, and full GitHub Actions workflows.
-
-See `AUDIT_FIX_REPORT.md` for the audit-ID-to-file-to-test matrix.
+- Add a Neon Postgres JSONB persistence adapter for character records and video render manifests. Local development/tests keep the existing JSON-file fallback.
+- Store imported VRM binaries in Neon Postgres so they survive Render Free restarts. Enforce a 25MB per-file and 300MB aggregate asset cap to stay within a conservative free-tier budget.
+- Require DATABASE_URL when REQUIRE_DATABASE_URL=true, preventing silent fallback to ephemeral local files in production.
+- Preserve Narrativ Forge expression maps across persona-pack import/export round trips.
+- Move the Render backend blueprint to the Free plan, use /tmp only for temporary files, and configure the Worker origin for the frontend.
+- Remove public Telegram group/topic identifiers from source defaults and health output; use runtime environment variables instead.
+- Align checked-in Wrangler backend/origin values with the existing Render hostnames.
+- Configure Mypy with the backend package path so app.persistence is type-checked in CI.
 
 ## Validation
 
-- Backend: Ruff, Mypy, **48 pytest tests passed**.
-- Frontend: ESLint, **12 Vitest tests passed**, production build passed.
-- Worker: both JavaScript files pass `node --check`, **9 Node tests passed**, Wrangler dry-run passed.
-- Dependency audits: no Python vulnerabilities reported; npm high-severity gate passes. The frontend dependency tree still reports **9 moderate** findings in the ESLint/TypeScript-ESLint development toolchain and no high/critical findings.
+- GitHub Actions CI run #38: backend, frontend, and Worker jobs all passed.
+- Backend: Ruff passed, Mypy passed, **54 pytest tests passed**.
+- Frontend: ESLint passed, **12 Vitest tests passed**, production build passed.
+- Worker: **9 Node tests passed**, Wrangler dry-run passed; Worker Lint run #31 passed.
+- Python dependency audit passed. NPM high-severity gate passed; **9 moderate** development-toolchain findings remain, with no high/critical findings.
 
-## Deployment configuration required
+## Free deployment setup
 
-- Configure `API_AUTH_TOKEN` identically as a Render backend environment variable and Cloudflare Worker secret.
-- Configure `TELEGRAM_WEBHOOK_SECRET` identically in Render and Worker secrets; keep `TELEGRAM_BOT_TOKEN` in Render backend only.
-- Set exact `ALLOWED_ORIGINS` in Render and Worker, `BACKEND_API_URL` in Worker, and `VITE_API_URL` in the Render frontend to the Worker origin.
-- Set `TELEGRAM_IMPORT_ALLOWED_HOSTS` to trusted HTTPS download hosts.
-- The Render backend blueprint now targets the Free plan and uses Neon Postgres (DATABASE_URL) for durable character/render-plan data; no paid Render plan or disk is required. Render service environment configuration and deployment are still pending workspace confirmation.
+- Neon Free project provisioned in AWS Singapore; tables auracraft_state and auracraft_assets initialized.
+- Render blueprint uses Free plan and requires DATABASE_URL, REQUIRE_DATABASE_URL=true, exact ALLOWED_ORIGINS, and runtime Telegram variables.
+- Cloudflare Worker uses the existing workers.dev endpoint; its live ALLOWED_ORIGINS and API_AUTH_TOKEN bindings still need to be aligned with the backend.
+- Render workspace/service inspection, environment updates, data migration, and deployment are waiting for the user's explicit confirmation to use the available My Workspace. No production deployment or paid resource has been created.
 
-## Deferred / limitations
+## Remaining product limitations
 
-- R2 is not enabled; uploaded custom VRM files in backend temporary storage are not durable on Render Free yet.
-- Legacy browser `blob:` URLs already invalidated by a previous page session cannot be recovered; new uploads persist correctly in IndexedDB.
-- The first GitHub Actions run exposed a duplicate npm workspace name and a vulnerable runner-preinstalled setuptools version; both were corrected. GitHub Actions run #14 passed backend, frontend, and Worker jobs; Worker Lint run #6 passed.
-
-
-## Free-tier follow-up branch
-
-This branch adds Neon Postgres persistence for character records and render manifests, changes the Render blueprint to Free, removes public Telegram identifiers from source defaults/health output, and adds persistence tests. Neon Free project is provisioned in Singapore; Render service environment updates and deployment are not yet performed. Custom VRM file durability, actual MP4 rendering, and Narrativ Forge integration remain open items.
+- The Video Studio endpoint currently creates and stores JSON render plans; actual MP4 generation is not implemented.
+- Narrativ Forge-compatible JSON persona packs are supported, including expression-map round trips, but no external Narrativ Forge API integration is configured.
+- Legacy user data from the current Render service must be inspected and migrated before switching production traffic to the new Neon-backed build.
+- Render Free may sleep when idle. Neon persistence keeps app data durable, but cold starts and free-tier quotas still apply.
+- The frontend npm audit retains 9 moderate findings in the ESLint/TypeScript-ESLint development dependency chain; no unsafe major-version override was applied.
