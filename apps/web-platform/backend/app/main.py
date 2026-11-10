@@ -416,6 +416,16 @@ class ManualPersonaPack(BaseModel):
     vrm_model_path: str = Field(default="/models/sample_avatar_a.vrm", max_length=500)
     avatar_color: str = Field(default="#8b5cf6", max_length=20)
     default_emotion: str = Field(default="neutral", max_length=40)
+    expression_map: dict[str, str] = Field(
+        default_factory=lambda: {
+            "neutral": "blendshape_neutral",
+            "happy": "blendshape_happy",
+            "angry": "blendshape_angry",
+            "sad": "blendshape_sad",
+            "surprised": "blendshape_surprised",
+        },
+        max_length=20,
+    )
     character_meta: PersonaCharacterMeta
 
 
@@ -1172,6 +1182,7 @@ def _import_persona_pack(pack: ManualPersonaPack, chars: list[dict[str, Any]]) -
         "vrm_model": pack.vrm_model_path,
         "default_emotion": pack.default_emotion.strip(),
         "avatar_color": pack.avatar_color.strip(),
+        "expression_map": pack.expression_map,
         "tags": [tag.strip() for tag in pack.character_meta.tags if tag.strip()],
     }
     chars.append(imported)
@@ -1224,13 +1235,13 @@ def export_character_pack(payload: PersonaPackExportRequest, _: None = Depends(r
         },
         "vrm_model_path": target["vrm_model"],
         "avatar_color": target.get("avatar_color", "#8b5cf6"),
-        "expression_map": {
+        "expression_map": target.get("expression_map", {
             "neutral": "blendshape_neutral",
             "happy": "blendshape_happy",
             "angry": "blendshape_angry",
             "sad": "blendshape_sad",
             "surprised": "blendshape_surprised"
-        },
+        }),
         "character_meta": {
             "personality_prompt": target["personality"],
             "style": target.get("style", "general"),
@@ -1292,13 +1303,13 @@ def download_persona_pack(character_id: str):
         },
         "vrm_model_path": target["vrm_model"],
         "avatar_color": target.get("avatar_color", "#8b5cf6"),
-        "expression_map": {
+        "expression_map": target.get("expression_map", {
             "neutral": "blendshape_neutral",
             "happy": "blendshape_happy",
             "angry": "blendshape_angry",
             "sad": "blendshape_sad",
             "surprised": "blendshape_surprised"
-        },
+        }),
         "character_meta": {
             "personality_prompt": target["personality"],
             "style": target.get("style", "general"),
