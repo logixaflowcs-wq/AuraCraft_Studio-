@@ -87,6 +87,8 @@ def test_telegram_speak_escapes_html_input(monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setattr(main, "TELEGRAM_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setattr(main, "TELEGRAM_TOPIC_ID", 215)
+    monkeypatch.setattr(main, "TELEGRAM_GROUP_CHAT_ID", "-1003992125718")
 
     async def fake_audio(text, voice):
         return b"test-mp3"
