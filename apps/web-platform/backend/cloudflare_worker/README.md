@@ -1,62 +1,35 @@
-# AuraCraft Studio — Cloudflare Edge Telegram Bot Worker
+# AuraCraft Studio Cloudflare Edge Gateway
 
-Zero-cost, serverless Telegram bot webhook running on Cloudflare Workers (100,000 free requests per day).
+The Worker provides two routes:
 
-## Features
-- **Bot Username**: `@AuraCraftNexusBot` (https://t.me/AuraCraftNexusBot)
-- **Supergroup Scoped**: Strictly bound to chat `-1003992125718`
-- **Topic 215 Enforcement**: Messages outside Topic 215 are safely ignored (fail-closed)
-- **Zero Compute Cost**: Runs entirely on Cloudflare Free Tier without paid Render workers
-- **Edge Performance**: Sub-50ms response latency globally
+- `POST /webhook`: validates Telegram's webhook secret and a 64KB body cap, then forwards the update to the canonical FastAPI `/api/telegram/webhook` handler.
+- Other `/api/*` and `/ready` requests: checks the exact `ALLOWED_ORIGINS` list, injects the server-side `API_AUTH_TOKEN`, and proxies the request to FastAPI. The token must never be placed in a Vite environment variable or browser bundle.
 
----
+## Configure and deploy
 
-## 1. Bot Credentials
-- **Bot Name**: AuraCraft Studio
-- **Username**: `@AuraCraftNexusBot`
-- **Link**: https://t.me/AuraCraftNexusBot
-- **Supergroup Chat ID**: `-1003992125718`
-- **Bound Topic ID**: `215`
-
----
-
-## 2. Deploy Cloudflare Worker (Zero Cost)
-From `D:\Project\logixaflow.cs@gmail.com\AuraCraft_Studio-\apps\web-platform\backend\cloudflare_worker`:
+From this directory:
 
 ```bash
-# 1. Login to your free Cloudflare account
-npx wrangler login
+npm ci
+npm test
+npm run lint
+```
 
-# 2. Set your Telegram Bot Token
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-# Paste the current token from your private password manager.
+Set `BACKEND_API_URL` and `ALLOWED_ORIGINS` in `wrangler.toml` to your actual HTTPS backend and frontend origins. Then configure secrets:
 
-# 3. Set your Webhook Secret Token
+```bash
+npx wrangler secret put API_AUTH_TOKEN
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-# Paste a strong, private webhook secret.
-
-# 4. Set the two authorized owner IDs
-npx wrangler secret put TELEGRAM_ALLOWED_USER_IDS
-
-# 5. Deploy worker to Cloudflare Edge
+npx wrangler deploy --dry-run
 npx wrangler deploy
 ```
 
----
+`API_AUTH_TOKEN` must match the backend Render environment variable. `TELEGRAM_WEBHOOK_SECRET` must match the backend webhook secret. Keep `TELEGRAM_BOT_TOKEN` only in the backend environment. The backend also requires `ALLOWED_ORIGINS` to match the frontend origin.
 
-## 3. Register Webhook with Telegram
-Once deployed, you will get a URL like `https://auracraft-studio-telegram-worker.<your-subdomain>.workers.dev`.
-Register it with Telegram via browser or curl:
+Set the Render static-site environment variable `VITE_API_URL` to the deployed Worker origin. Do not set `VITE_API_AUTH_TOKEN`.
 
-```bash
-curl -F "url=https://auracraft-studio-telegram-worker.<your-subdomain>.workers.dev" \
-     -F "secret_token=<your-private-webhook-secret>" \
-     https://api.telegram.org/bot<your-private-bot-token>/setWebhook
-```
+Register Telegram's webhook to `https://<worker-host>/webhook` using the same webhook secret. Do not also register the backend as a second webhook destination; the Worker forwards each update to FastAPI.
 
-Or open in browser:
-```
-Use Telegram's Bot API with the same two private values; do not place either credential in a browser URL or documentation.
-```
+## Optional R2 storage
 
-You are all set! AuraCraft Studio Bot will now respond inside Topic #215 at zero cost.
+A commented R2 binding is included in `wrangler.toml`. Create the bucket and uncomment the binding only when the application begins using it.

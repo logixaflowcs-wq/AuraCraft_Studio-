@@ -12,8 +12,46 @@
  */
 
 import JSZip from 'jszip';
+import { z } from 'zod';
 import { saveAs } from 'file-saver';
 import type { Character, AuraManifest } from '../types/character';
+
+// FIX(audit-1-I): reject malformed or extended manifests before consuming package assets.
+const auraManifestSchema = z.object({
+  version: z.literal('1.0'),
+  characterId: z.string().min(1).max(128),
+  characterName: z.string().min(1).max(200),
+  vrmChecksum: z.string().regex(/^[a-f0-9]{64}$/i),
+  identityPrompt: z.string().max(10000),
+  tags: z.array(z.string().max(100)).max(100),
+  style: z.enum(['anime', 'realistic', 'myanmar', 'army', 'custom']),
+  exportedAt: z.string().datetime(),
+  source: z.literal('AuraCraft-Studio-v1'),
+}).strict();
+
+const MAX_TOTAL_UNCOMPRESSED = 200 * 1024 * 1024;
+const MAX_VRM_BYTES = 100 * 1024 * 1024;
+const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 256 * 1024;
+
+// FIX(audit-1-I): inspect central-directory sizes before decompression to bound ZIP expansion.
+export function validateArchiveEntries(zip: JSZip): void {
+  let total = 0;
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue;
+    const size = (entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize;
+    if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) {
+      throw new Error('Invalid .aura archive entry size');
+    }
+    total += size;
+    if (total > MAX_TOTAL_UNCOMPRESSED) throw new Error('.aura archive exceeds 200MB expanded limit');
+    if (name === 'model.vrm' && size > MAX_VRM_BYTES) throw new Error('VRM file exceeds 100MB limit');
+    if ((name === 'thumbnail.png' || name === 'reference-sheet.png') && size > MAX_THUMBNAIL_BYTES) {
+      throw new Error('Image asset exceeds 5MB limit');
+    }
+    if (name === 'manifest.json' && size > MAX_MANIFEST_BYTES) throw new Error('Manifest exceeds 256KB limit');
+  }
+}
 
 // ─────────────────────────────────────────────
 // SHA-256 Checksum
@@ -42,7 +80,13 @@ async function sha256Hex(blob: Blob): Promise<string> {
  */
 export async function exportCharacterAsAura(character: Character): Promise<void> {
   if (!character.vrmBlob) {
-    throw new Error(`Character "${character.name}" has no VRM file to export.`);
+    throw new Error('Character ' + character.name + ' has no VRM file to export.');
+  }
+  // FIX(audit-1-I): enforce the same asset limits on generated packages as imported packages.
+  if (character.vrmBlob.size > MAX_VRM_BYTES) throw new Error('VRM file exceeds 100MB limit');
+  if ((character.thumbnailBlob?.size || 0) > MAX_THUMBNAIL_BYTES ||
+      (character.referenceSheetBlob?.size || 0) > MAX_THUMBNAIL_BYTES) {
+    throw new Error('Image asset exceeds 5MB limit');
   }
 
   const zip = new JSZip();
@@ -78,6 +122,11 @@ export async function exportCharacterAsAura(character: Character): Promise<void>
     zip.file('reference-sheet.png', character.referenceSheetBlob);
   }
 
+  // FIX(audit-1-I): refuse exports whose combined uncompressed payload exceeds the import cap.
+  const totalAssetBytes = character.vrmBlob.size + (character.thumbnailBlob?.size || 0) +
+    (character.referenceSheetBlob?.size || 0) + new TextEncoder().encode(JSON.stringify(manifest)).byteLength;
+  if (totalAssetBytes > MAX_TOTAL_UNCOMPRESSED) throw new Error('.aura package exceeds 200MB expanded limit');
+
   // 6. Generate ZIP and trigger download
   const zipBlob = await zip.generateAsync({
     type: 'blob',
@@ -111,13 +160,15 @@ export interface ImportedAuraPackage {
  */
 export async function importAuraPackage(auraFile: File | Blob): Promise<ImportedAuraPackage> {
   const zip = await JSZip.loadAsync(auraFile);
+  validateArchiveEntries(zip);
 
   // Load manifest
   const manifestFile = zip.file('manifest.json');
   if (!manifestFile) {
     throw new Error('Invalid .aura file: manifest.json is missing');
   }
-  const manifest: AuraManifest = JSON.parse(await manifestFile.async('string'));
+  const rawManifest: unknown = JSON.parse(await manifestFile.async('string'));
+  const manifest = auraManifestSchema.parse(rawManifest) as AuraManifest;
 
   // Load VRM
   const vrmFile = zip.file('model.vrm');
@@ -129,13 +180,10 @@ export async function importAuraPackage(auraFile: File | Blob): Promise<Imported
   });
 
   // Verify checksum
-  if (manifest.vrmChecksum) {
-    const actualChecksum = await sha256Hex(vrmBlob);
-    if (actualChecksum !== manifest.vrmChecksum) {
-      throw new Error(
-        `Checksum mismatch for "${manifest.characterName}". File may be corrupted.`
-      );
-    }
+  // FIX(audit-1-I): checksum is mandatory; no package may bypass integrity verification.
+  const actualChecksum = await sha256Hex(vrmBlob);
+  if (actualChecksum !== manifest.vrmChecksum) {
+    throw new Error('Checksum mismatch for ' + manifest.characterName + '. File may be corrupted.');
   }
 
   // Load optional assets

@@ -1,0 +1,14 @@
+{
+  "name": "auracraft-studio-edge-gateway",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "node --check index.js && node --check index.test.js",
+    "test": "node --test index.test.js",
+    "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "4.159.0"
+  }
+}

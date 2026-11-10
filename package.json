@@ -3,17 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "description": "AuraCraft Studio: Real-Time 3D VRM Virtual Persona & Autonomous Neural Voice Studio",
-  "workspaces": [
-    "apps/web-platform/*",
-    "apps/*"
-  ],
   "scripts": {
     "dev": "npm --prefix apps/web-platform/frontend run dev",
     "build": "npm --prefix apps/web-platform/frontend run build",
     "preview": "npm --prefix apps/web-platform/frontend run preview",
     "dev:backend": "python -m uvicorn app.main:app --app-dir apps/web-platform/backend --port 8010 --reload",
-    "test:backend": "pytest apps/web-platform/backend",
-    "deploy:worker": "npx --prefix apps/web-platform/backend/cloudflare_worker wrangler deploy"
+    "test:backend": "pytest -q apps/web-platform/backend/tests",
+    "deploy:worker": "npm --prefix apps/web-platform/backend/cloudflare_worker run deploy",
+    "lint": "npm --prefix apps/web-platform/frontend run lint && npm --prefix apps/web-platform/backend/cloudflare_worker run lint",
+    "test": "cd apps/web-platform/frontend && ./node_modules/.bin/vitest run",
+    "lint:backend": "ruff check apps/web-platform/backend",
+    "typecheck:backend": "mypy apps/web-platform/backend/app/main.py",
+    "test:worker": "npm --prefix apps/web-platform/backend/cloudflare_worker test"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.3.4",

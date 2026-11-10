@@ -1,21 +1,24 @@
 name = "auracraft-studio-telegram-worker"
 main = "index.js"
-compatibility_date = "2024-09-23"
+compatibility_date = "2026-11-10"
 
 # Zero-Cost Free Tier Worker Configuration
 # Free allowance: 100,000 requests per day across Cloudflare Edge
 workers_dev = true
 
 [vars]
-TELEGRAM_TOPIC_ID = "215"
-TELEGRAM_GROUP_CHAT_ID = "-1003992125718"
-STUDIO_NAME = "AuraCraft Studio"
 ENVIRONMENT = "production"
-# Configure this in the Worker dashboard or with `wrangler secret put`.
-# The worker fails closed until the two owner account IDs are supplied.
-TELEGRAM_ALLOWED_USER_IDS = "1686310706,6759217947"
+BACKEND_API_URL = "https://auracraft-backend.onrender.com"
+ALLOWED_ORIGINS = "https://auracraft-frontend.onrender.com"
 
-# Secrets to be configured via `wrangler secret put <NAME>`:
-# - TELEGRAM_BOT_TOKEN
-# - TELEGRAM_WEBHOOK_SECRET
-# - FRONTEND_BASE_URL (only set after the deployed dashboard returns HTTP 200)
+[observability]
+enabled = true
+
+# Optional future object storage binding; enable only after creating the bucket.
+# [[r2_buckets]]
+# binding = "AURACRAFT_ASSETS"
+# bucket_name = "auracraft-assets"
+
+# Secrets to configure with `wrangler secret put <NAME>`:
+# - API_AUTH_TOKEN (same value as the backend; never expose it to Vite)
+# - TELEGRAM_WEBHOOK_SECRET (same value as the backend)

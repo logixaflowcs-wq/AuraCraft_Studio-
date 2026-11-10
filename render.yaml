@@ -3,24 +3,38 @@ services:
     name: auracraft-backend
     env: python
     region: singapore
-    plan: free
+    # Persistent disks require a paid Render service; this is not deployed by this audit.
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: auracraft-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
       - key: APP_ENV
         value: production
-      - key: TELEGRAM_CHAT_ID
+      - key: AURACRAFT_DATA_DIR
+        value: /data
+      - key: BACKEND_PUBLIC_URL
+        value: https://auracraft-backend.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: https://auracraft-frontend.onrender.com
+      - key: TELEGRAM_GROUP_CHAT_ID
         value: "-1003992125718"
       - key: TELEGRAM_TOPIC_ID
         value: "215"
       - key: TELEGRAM_ALLOWED_USER_IDS
         value: "1686310706,6759217947"
-      # Secure tokens can be populated via Render Environment Dashboard
+      - key: API_AUTH_TOKEN
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_IMPORT_ALLOWED_HOSTS
         sync: false
     rootDir: apps/web-platform/backend
     healthCheckPath: /health
@@ -30,9 +44,10 @@ services:
     env: static
     region: singapore
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     staticPublishPath: dist
     rootDir: apps/web-platform/frontend
     envVars:
+      # Set this to the deployed Cloudflare Worker origin in the Render dashboard.
       - key: VITE_API_URL
-        value: https://auracraft-backend.onrender.com
+        sync: false

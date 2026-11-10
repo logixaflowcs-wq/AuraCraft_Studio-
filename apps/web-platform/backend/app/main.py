@@ -1,25 +1,41 @@
 from __future__ import annotations
 
-import base64
+import asyncio
+import hashlib
+import hmac
+import html
 import io
 import json
+import logging
 import os
-import hmac
+import re
+import shutil
+import tempfile
+import threading
+import time
+import zipfile
+from collections import defaultdict, deque
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import edge_tts
 import httpx
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
-from fastapi import FastAPI, HTTPException, Query, Response, Request, Header
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.responses import FileResponse, JSONResponse
+from filelock import FileLock
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="AuraCraft Studio Backend Service",
@@ -27,15 +43,72 @@ app = FastAPI(
     version="1.0.0",
 )
 
+_allowed_origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_credentials=bool(_allowed_origins),
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Telegram-Bot-Api-Secret-Token"],
 )
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# FIX(audit-1-D): production must never start with wildcard or missing CORS origins.
+@app.on_event("startup")
+async def validate_production_configuration():
+    environment = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "").lower()
+    if environment in {"production", "prod"} and not _allowed_origins:
+        raise RuntimeError("ALLOWED_ORIGINS must be configured in production")
+
+
+# FIX(audit-1-B): protect write APIs with a constant-time checked bearer token.
+def require_auth(authorization: str | None = Header(default=None)) -> None:
+    expected = os.getenv("API_AUTH_TOKEN", "").strip()
+    if not expected:
+        if _production_mode():
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return
+    scheme, _, supplied = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+# FIX(audit-1-E): bound TTS usage to ten requests/minute per client and credential.
+_tts_rate_lock = threading.Lock()
+_tts_rate_events: dict[str, deque[float]] = defaultdict(deque)
+def enforce_tts_rate_limit(request: Request, authorization: str | None = Header(default=None)) -> None:
+    # FIX(audit-1-E): the edge gateway overwrites this header with Cloudflare's client IP.
+    client_ip = request.headers.get("X-Forwarded-For") or (request.client.host if request.client else "unknown")
+    token_fingerprint = hmac.new(os.getenv("API_AUTH_TOKEN", "").encode(), (authorization or "").encode(), "sha256").hexdigest()
+    key = f"{client_ip}:{token_fingerprint}"
+    now = time.monotonic()
+    with _tts_rate_lock:
+        # FIX(audit-1-E): cap per-process key cardinality and evict expired buckets under high-cardinality traffic.
+        if key not in _tts_rate_events and len(_tts_rate_events) >= 10000:
+            for stale_key, stale_events in list(_tts_rate_events.items()):
+                while stale_events and now - stale_events[0] >= 60:
+                    stale_events.popleft()
+                if not stale_events:
+                    _tts_rate_events.pop(stale_key, None)
+            if len(_tts_rate_events) >= 10000:
+                _tts_rate_events.pop(next(iter(_tts_rate_events)))
+        events = _tts_rate_events[key]
+        while events and now - events[0] >= 60:
+            events.popleft()
+        if len(events) >= 10:
+            retry_after = max(1, int(60 - (now - events[0])))
+            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(retry_after)})
+        events.append(now)
+
+
+# FIX(audit-1-F): centralize unexpected failures; keep tracebacks in server logs only.
+@app.exception_handler(Exception)
+async def unexpected_error_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled API exception on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+# FIX(audit-2-A): allow persistent hosting volumes to own all runtime state.
+DATA_DIR = Path(os.getenv("AURACRAFT_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))).resolve()
 CHARACTERS_FILE = DATA_DIR / "characters.json"
 RENDER_PLAN_DIR = DATA_DIR / "render_plans"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -194,20 +267,65 @@ DEFAULT_CHARACTERS = [
     }
 ]
 
-def load_characters() -> List[Dict[str, Any]]:
-    if not CHARACTERS_FILE.exists():
-        with open(CHARACTERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(DEFAULT_CHARACTERS, f, indent=2, ensure_ascii=False)
-        return DEFAULT_CHARACTERS
-    try:
-        with open(CHARACTERS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return DEFAULT_CHARACTERS
+class CharacterRecord(BaseModel):
+    # FIX(audit-2-A): validate required fields while retaining forward-compatible metadata.
+    model_config = ConfigDict(extra="allow")
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=200)
+    role: str = "Virtual Actor"
+    style: str = "custom"
+    voice_id: str = "my-MM-NilarNeural"
+    language: str = "my-MM"
+    personality: str = "Enthusiastic and polite"
+    vrm_model: str = "/models/sample_avatar_a.vrm"
+    default_emotion: str = "neutral"
+    avatar_color: str = "#8b5cf6"
+    tags: list[str] = Field(default_factory=list)
 
-def save_characters(data: List[Dict[str, Any]]) -> None:
-    with open(CHARACTERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+
+_character_records = TypeAdapter(list[CharacterRecord])
+
+
+def _atomic_write_characters(data: list[dict[str, Any]]) -> None:
+    validated = [item.model_dump(mode="json") for item in _character_records.validate_python(data)]
+    temp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=DATA_DIR, prefix=".characters-", suffix=".tmp", delete=False) as handle:
+            temp_path = handle.name
+            json.dump(validated, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, CHARACTERS_FILE)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def load_characters() -> list[dict[str, Any]]:
+    # FIX(audit-2-A): serialize reads, corruption recovery, and default initialization across workers.
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(CHARACTERS_FILE) + ".lock"):
+        if not CHARACTERS_FILE.exists():
+            _atomic_write_characters(DEFAULT_CHARACTERS)
+            return DEFAULT_CHARACTERS
+        try:
+            with CHARACTERS_FILE.open("r", encoding="utf-8") as handle:
+                raw_data = json.load(handle)
+            return [item.model_dump(mode="json") for item in _character_records.validate_python(raw_data)]
+        except (OSError, json.JSONDecodeError, ValidationError, TypeError):
+            backup = DATA_DIR / f"characters.corrupt.{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}.json"
+            # Preserve the damaged source before restoring defaults; never silently discard it.
+            shutil.copy2(CHARACTERS_FILE, backup)
+            logger.exception("Character store was corrupt; backup created at %s", backup)
+            _atomic_write_characters(DEFAULT_CHARACTERS)
+            return DEFAULT_CHARACTERS
+
+
+def save_characters(data: list[dict[str, Any]]) -> None:
+    # FIX(audit-2-A): validate and atomically replace the JSON store under an inter-process lock.
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(CHARACTERS_FILE) + ".lock"):
+        _atomic_write_characters(data)
 
 
 # Pydantic Schemas
@@ -220,6 +338,8 @@ class SynthesizeRequest(BaseModel):
 
 class AvatarVideoPlanRequest(BaseModel):
     character_id: str = Field(min_length=1, max_length=120)
+    # FIX(audit-3-D): optional field preserves old clients while retaining selected voice metadata.
+    voice_id: str | None = Field(default=None, max_length=100)
     script: str = Field(min_length=1, max_length=10000)
     aspect_ratio: str = Field(default="9:16", pattern=r"^(9:16|16:9|1:1)$")
     seconds_per_scene: int = Field(default=6, ge=2, le=30)
@@ -233,8 +353,8 @@ class CharacterCreate(BaseModel):
     personality: str = Field(default="Enthusiastic and polite")
     vrm_model: str = Field(default="/models/sample_avatar_a.vrm")
     default_emotion: str = Field(default="neutral")
-    avatar_color: Optional[str] = Field(default="#8b5cf6")
-    tags: List[str] = Field(default_factory=list)
+    avatar_color: str | None = Field(default="#8b5cf6")
+    tags: list[str] = Field(default_factory=list)
 
 class PersonaPackExportRequest(BaseModel):
     character_id: str
@@ -249,7 +369,7 @@ class PersonaVoiceBinding(BaseModel):
 class PersonaCharacterMeta(BaseModel):
     personality_prompt: str = Field(default="Enthusiastic and polite", max_length=2000)
     style: str = Field(default="custom", max_length=50)
-    tags: List[str] = Field(default_factory=list, max_length=30)
+    tags: list[str] = Field(default_factory=list, max_length=30)
 
 
 class ManualPersonaPack(BaseModel):
@@ -257,7 +377,7 @@ class ManualPersonaPack(BaseModel):
 
     export_version: str = Field(default="1.0.0", max_length=20)
     source_studio: str = Field(default="AuraCraft Studio", max_length=100)
-    actor_id: str = Field(min_length=1, max_length=120)
+    actor_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     actor_name: str = Field(min_length=1, max_length=100)
     role: str = Field(default="Virtual Actor", max_length=100)
     style: str = Field(default="custom", max_length=50)
@@ -269,11 +389,12 @@ class ManualPersonaPack(BaseModel):
 
 
 class ManualPersonaPackBatch(BaseModel):
-    packs: List[ManualPersonaPack] = Field(min_length=1, max_length=50)
+    packs: list[ManualPersonaPack] = Field(min_length=1, max_length=50)
 
 
 @app.get("/health")
 def health_check():
+    # FIX(audit-2-C): this endpoint is liveness only and must not depend on downstream services.
     return {
         "status": "healthy",
         "service": "AuraCraft Studio Backend",
@@ -285,6 +406,43 @@ def health_check():
     }
 
 
+@app.get("/api/telegram/test")
+async def telegram_bot_test():
+    # FIX(audit-3-G): proxy Telegram getMe server-side without exposing the bot token to the browser.
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    if not token:
+        raise HTTPException(status_code=503, detail="Telegram bot is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+        payload = response.json()
+        if not response.is_success or not payload.get("ok"):
+            raise HTTPException(status_code=502, detail="Telegram bot check failed")
+        bot = payload.get("result", {})
+        return {"ok": True, "username": bot.get("username"), "first_name": bot.get("first_name")}
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError):
+        logger.exception("Telegram getMe check failed")
+        raise HTTPException(status_code=502, detail="Telegram bot check failed")
+
+
+@app.get("/ready")
+async def readiness_check():
+    # FIX(audit-2-C): readiness checks durable storage access and an actual Edge-TTS voice-list call.
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if not os.access(DATA_DIR, os.R_OK | os.W_OK):
+            raise OSError("data directory is not accessible")
+        if CHARACTERS_FILE.exists() and not os.access(CHARACTERS_FILE, os.R_OK | os.W_OK):
+            raise OSError("character store is not accessible")
+        await asyncio.wait_for(edge_tts.list_voices(), timeout=5)
+    except Exception:
+        logger.exception("Readiness check failed")
+        raise HTTPException(status_code=503, detail="Service not ready")
+    return {"status": "ready", "storage": "available", "tts": "available"}
+
+
 # Telegram Webhook & Topic 215 Policy
 TELEGRAM_TOPIC_ID = int(os.getenv("TELEGRAM_TOPIC_ID", "215"))
 TELEGRAM_GROUP_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1003992125718")
@@ -293,7 +451,7 @@ TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
 
 
 def _production_mode() -> bool:
-    environment = os.getenv("ENVIRONMENT", "").strip() or os.getenv("APP_ENV", "development").strip()
+    environment = os.getenv("ENV", "").strip() or os.getenv("ENVIRONMENT", "").strip() or os.getenv("APP_ENV", "development").strip()
     return environment.lower() in {"production", "prod"}
 
 
@@ -315,10 +473,221 @@ async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
-            return resp.status_code == 200
-    except Exception as exc:
-        print(f"[Telegram Webhook Error] Delivery failed: {exc}")
+            if not resp.is_success:
+                logger.error("Telegram sendMessage returned HTTP %s", resp.status_code)
+                return False
+            return bool(resp.json().get("ok"))
+    except httpx.HTTPError:
+        logger.exception("Telegram webhook delivery failed")
         return False
+
+
+async def send_telegram_audio(chat_id: Any, thread_id: Any, audio_bytes: bytes) -> str | None:
+    # FIX(audit-2-B): deliver generated Edge-TTS bytes through Telegram sendAudio and return its file_id.
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    if not token:
+        return None
+    url = f"https://api.telegram.org/bot{token}/sendAudio"
+    data = {"chat_id": str(chat_id), "message_thread_id": str(thread_id)}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                url,
+                data=data,
+                files={"audio": ("auracraft-speech.mp3", audio_bytes, "audio/mpeg")},
+            )
+        payload = response.json()
+        if not response.is_success or not payload.get("ok"):
+            logger.error("Telegram sendAudio failed with HTTP %s", response.status_code)
+            return None
+        return payload.get("result", {}).get("audio", {}).get("file_id")
+    except (httpx.HTTPError, ValueError):
+        logger.exception("Telegram audio delivery failed")
+        return None
+
+
+async def send_telegram_document(chat_id: Any, thread_id: Any, filename: str, content: bytes) -> str | None:
+    # FIX(audit-2-B): export the actual backend persona pack as a Telegram document.
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    if not token:
+        return None
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                url,
+                data={"chat_id": str(chat_id), "message_thread_id": str(thread_id)},
+                files={"document": (filename, content, "application/json")},
+            )
+        payload = response.json()
+        if not response.is_success or not payload.get("ok"):
+            logger.error("Telegram sendDocument failed with HTTP %s", response.status_code)
+            return None
+        return payload.get("result", {}).get("document", {}).get("file_id")
+    except (httpx.HTTPError, ValueError):
+        logger.exception("Telegram document delivery failed")
+        return None
+
+
+async def _generate_tts_audio(text: str, voice: str) -> bytes:
+    # FIX(audit-2-B): share the real Edge-TTS generation path between HTTP and Telegram callers.
+    communicate = edge_tts.Communicate(text=text, voice=voice)
+    stream = io.BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            stream.write(chunk["data"])
+    audio = stream.getvalue()
+    if not audio:
+        raise HTTPException(status_code=502, detail="TTS synthesis failed")
+    return audio
+
+
+async def _synthesize_telegram_audio(text: str, voice: str) -> bytes:
+    # FIX(audit-2-B): production Telegram speech uses the authenticated POST /api/tts/synthesize endpoint.
+    base_url = os.getenv("BACKEND_PUBLIC_URL", "").rstrip("/")
+    api_token = os.getenv("API_AUTH_TOKEN", "").strip()
+    if base_url and api_token:
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(
+                    f"{base_url}/api/tts/synthesize",
+                    json={"text": text, "voice": voice},
+                    headers={"Authorization": f"Bearer {api_token}"},
+                )
+            if not response.is_success or not response.content:
+                logger.error("Telegram TTS endpoint returned HTTP %s", response.status_code)
+                raise HTTPException(status_code=502, detail="TTS synthesis failed")
+            return response.content
+        except httpx.HTTPError:
+            logger.exception("Telegram TTS endpoint request failed")
+            raise HTTPException(status_code=502, detail="TTS synthesis failed")
+    if _production_mode():
+        raise HTTPException(status_code=503, detail="TTS endpoint configuration is missing")
+    return await _generate_tts_audio(text, voice)
+
+
+async def _download_persona_pack(url: str) -> bytes:
+    # FIX(audit-2-B): HTTPS allowlisting, no redirects, and a compressed download cap prevent SSRF and oversized imports.
+    parsed = urlsplit(url)
+    allowed_hosts = {host.strip().lower() for host in os.getenv("TELEGRAM_IMPORT_ALLOWED_HOSTS", "").split(",") if host.strip()}
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise HTTPException(status_code=422, detail="Import URL must be a valid HTTPS URL")
+    if parsed.hostname.lower() not in allowed_hosts:
+        raise HTTPException(status_code=403, detail="Import host is not allowed")
+    max_download_bytes = 120 * 1024 * 1024
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client, client.stream("GET", url) as response:
+            if not response.is_success:
+                raise HTTPException(status_code=502, detail="Persona pack download failed")
+            length = int(response.headers.get("Content-Length", "0") or 0)
+            if length > max_download_bytes:
+                raise HTTPException(status_code=413, detail="Persona package exceeds download limit")
+            chunks = bytearray()
+            async for chunk in response.aiter_bytes():
+                chunks.extend(chunk)
+                if len(chunks) > max_download_bytes:
+                    raise HTTPException(status_code=413, detail="Persona package exceeds download limit")
+            return bytes(chunks)
+    except HTTPException:
+        raise
+    except httpx.HTTPError:
+        logger.exception("Persona package download failed")
+        raise HTTPException(status_code=502, detail="Persona pack download failed")
+
+
+def _import_aura_archive(archive_bytes: bytes, chars: list[dict[str, Any]]) -> dict[str, Any]:
+    # FIX(audit-1-I): validate ZIP expansion, strict manifest fields, and VRM checksum before writing any asset.
+    if len(archive_bytes) > 120 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Aura package exceeds compressed size limit")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos if not info.is_dir()]
+            allowed_names = {"manifest.json", "model.vrm", "thumbnail.png", "reference-sheet.png"}
+            if len(names) != len(set(names)) or any(name not in allowed_names for name in names):
+                raise HTTPException(status_code=422, detail="Aura package contains unsupported entries")
+            if "manifest.json" not in names or "model.vrm" not in names:
+                raise HTTPException(status_code=422, detail="Aura package is missing required files")
+            sizes = {info.filename: info.file_size for info in infos if not info.is_dir()}
+            if sum(sizes.values()) > 200 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Aura package exceeds expanded size limit")
+            if sizes["manifest.json"] > 256 * 1024:
+                raise HTTPException(status_code=413, detail="Aura manifest exceeds 256KB")
+            if sizes["model.vrm"] <= 0 or sizes["model.vrm"] > 100 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="VRM file exceeds 100MB limit")
+            for image_name in ("thumbnail.png", "reference-sheet.png"):
+                if sizes.get(image_name, 0) > 5 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="Image asset exceeds 5MB limit")
+            manifest = json.loads(archive.read("manifest.json"))
+            required_keys = {"version", "characterId", "characterName", "vrmChecksum", "identityPrompt", "tags", "style", "exportedAt", "source"}
+            if not isinstance(manifest, dict) or set(manifest) != required_keys:
+                raise HTTPException(status_code=422, detail="Aura manifest schema is invalid")
+            if manifest["version"] != "1.0" or manifest["source"] != "AuraCraft-Studio-v1":
+                raise HTTPException(status_code=422, detail="Unsupported Aura package version")
+            actor_id = manifest["characterId"]
+            actor_name = manifest["characterName"]
+            if not isinstance(actor_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
+                raise HTTPException(status_code=422, detail="Invalid actor_id")
+            if not isinstance(actor_name, str) or not actor_name.strip() or len(actor_name) > 200:
+                raise HTTPException(status_code=422, detail="Invalid character name")
+            checksum = manifest["vrmChecksum"]
+            if not isinstance(checksum, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", checksum):
+                raise HTTPException(status_code=422, detail="Aura VRM checksum is required")
+            if not isinstance(manifest["identityPrompt"], str) or len(manifest["identityPrompt"]) > 10000:
+                raise HTTPException(status_code=422, detail="Aura identity prompt is invalid")
+            if not isinstance(manifest["tags"], list) or len(manifest["tags"]) > 100 or any(not isinstance(tag, str) or len(tag) > 100 for tag in manifest["tags"]):
+                raise HTTPException(status_code=422, detail="Aura tags are invalid")
+            if not isinstance(manifest["style"], str) or manifest["style"] not in {"anime", "realistic", "myanmar", "army", "custom"}:
+                raise HTTPException(status_code=422, detail="Aura style is invalid")
+            if not isinstance(manifest["exportedAt"], str):
+                raise HTTPException(status_code=422, detail="Aura export timestamp is invalid")
+            try:
+                datetime.fromisoformat(manifest["exportedAt"])
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Aura export timestamp is invalid")
+            vrm_bytes = archive.read("model.vrm")
+            actual_checksum = hashlib.sha256(vrm_bytes).hexdigest()
+            if not hmac.compare_digest(actual_checksum.lower(), checksum.lower()):
+                raise HTTPException(status_code=422, detail="Aura VRM checksum mismatch")
+            if any(str(item.get("id")) == actor_id for item in chars):
+                return {"status": "exists", "actor_id": actor_id, "actor_name": actor_name}
+            asset_dir = DATA_DIR / "imported_vrms"
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            target = (asset_dir / f"{actor_id}.vrm").resolve()
+            if os.path.commonpath((str(asset_dir.resolve()), str(target))) != str(asset_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid VRM storage path")
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile("wb", dir=asset_dir, prefix=".vrm-", suffix=".tmp", delete=False) as handle:
+                    temp_path = handle.name
+                    handle.write(vrm_bytes)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp_path, target)
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            character = {
+                "id": actor_id,
+                "name": actor_name.strip(),
+                "role": "Imported Aura Character",
+                "style": manifest["style"],
+                "voice_id": "my-MM-NilarNeural",
+                "language": "my-MM",
+                "personality": manifest["identityPrompt"],
+                "vrm_model": f"/api/characters/vrm/{actor_id}",
+                "default_emotion": "neutral",
+                "avatar_color": "#8b5cf6",
+                "tags": manifest["tags"],
+            }
+            chars.append(character)
+            save_characters(chars)
+            return {"status": "imported", "actor_id": actor_id, "actor_name": actor_name}
+    except HTTPException:
+        raise
+    except (zipfile.BadZipFile, json.JSONDecodeError, KeyError, OSError):
+        logger.exception("Aura archive validation failed")
+        raise HTTPException(status_code=422, detail="Aura package is invalid")
 
 
 @app.on_event("startup")
@@ -337,8 +706,9 @@ async def register_telegram_commands_on_startup():
         {"command": "voice", "description": "Preview actor voice: /voice <char_id> <text>"},
         {"command": "render", "description": "Generate multi-scene video plan: /render <script>"},
         {"command": "export", "description": "Export persona pack: /export <char_id>"},
+        {"command": "import", "description": "Import an allowed-host JSON persona pack: /import <url>"},
     ]
-    payload: Dict[str, Any] = {"commands": commands}
+    payload: dict[str, Any] = {"commands": commands}
     if chat_id:
         try:
             payload["scope"] = {"type": "chat", "chat_id": int(chat_id)}
@@ -349,8 +719,8 @@ async def register_telegram_commands_on_startup():
             resp = await client.post(f"https://api.telegram.org/bot{token}/setMyCommands", json=payload)
             if resp.status_code == 200:
                 print("[Telegram Startup] Successfully registered AuraCraft bot commands via setMyCommands")
-    except Exception as exc:
-        print(f"[Telegram Startup] Note: Command registration skipped ({exc})")
+    except httpx.HTTPError:
+        logger.exception("Telegram command registration failed")
 
 
 def _allowed_telegram_user_ids() -> set[str]:
@@ -360,7 +730,7 @@ def _allowed_telegram_user_ids() -> set[str]:
 @app.post("/api/telegram/webhook")
 async def telegram_webhook(
     request: Request,
-    x_telegram_bot_api_secret_token: Optional[str] = Header(None)
+    x_telegram_bot_api_secret_token: str | None = Header(None)
 ):
     """AuraCraft Telegram Webhook (Strictly Topic 215 Scoped)."""
     # 1. Require Telegram's webhook secret; missing secrets must never be accepted.
@@ -386,7 +756,9 @@ async def telegram_webhook(
     user_id = message.get("from", {}).get("id")
     if _production_mode() and not allowed_users:
         raise HTTPException(status_code=503, detail="Telegram user allowlist is not configured")
-    if allowed_users and str(user_id) not in allowed_users:
+    # FIX(audit-1-H): compare Telegram allowlisted user IDs without early-exit string equality.
+    user_id_text = str(user_id)
+    if allowed_users and not any(hmac.compare_digest(user_id_text, allowed_id) for allowed_id in allowed_users):
         return {"ok": True, "ignored": "unauthorized_user"}
 
     text = message.get("text", "").strip()
@@ -394,7 +766,9 @@ async def telegram_webhook(
 
     reply_text = ""
     action_type = ""
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
+    audio_request: tuple[str, str] | None = None
+    document_request: tuple[str, bytes] | None = None
 
     if command in {"/start", "/help", "/commands"}:
         action_type = "help"
@@ -415,7 +789,7 @@ async def telegram_webhook(
     elif command == "/characters":
         action_type = "characters"
         chars = load_characters()
-        c_lines = [f"• <b>{c['name']}</b> ({c.get('style', 'custom')} | <code>{c['voice_id']}</code>)" for c in chars[:8]]
+        c_lines = [f"• <b>{html.escape(str(c['name']))}</b> ({html.escape(str(c.get('style', 'custom')))} | <code>{html.escape(str(c['voice_id']))}</code>)" for c in chars[:8]]
         reply_text = "🎭 <b>AuraCraft Archetypes (Topic 215):</b>\n" + "\n".join(c_lines)
     elif command == "/speak":
         action_type = "speak"
@@ -423,7 +797,8 @@ async def telegram_webhook(
         if not speak_text:
             reply_text = "⚠️ Usage: /speak <text to say>"
         else:
-            reply_text = f"🎙️ <b>Speech Queued:</b> {speak_text[:120]}\nVoice: <code>my-MM-NilarNeural</code>\nStatus: Synthesized zero-cost Edge-TTS"
+            audio_request = (speak_text, "my-MM-NilarNeural")
+            reply_text = f"🎙️ <b>Generating speech:</b> {html.escape(speak_text[:120])}\nVoice: <code>my-MM-NilarNeural</code>"
     elif command == "/voice":
         action_type = "voice"
         _, _, voice_request = text.partition(" ")
@@ -437,7 +812,8 @@ async def telegram_webhook(
             else:
                 extra["character_id"] = character_id
                 extra["voice_id"] = character["voice_id"]
-                reply_text = f"🎙️ <b>{character['name']}</b>\nVoice: <code>{character['voice_id']}</code>\nText: {speak_text.strip()[:100]}"
+                audio_request = (speak_text.strip(), character["voice_id"])
+                reply_text = f"🎙️ <b>{html.escape(str(character['name']))}</b>\nVoice: <code>{html.escape(str(character['voice_id']))}</code>\nText: {html.escape(speak_text.strip()[:100])}"
     elif command == "/render":
         action_type = "render"
         render_script = text.partition(" ")[2].strip()
@@ -461,12 +837,58 @@ async def telegram_webhook(
         if not char_id:
             reply_text = "⚠️ Usage: /export <character_id>"
         else:
-            reply_text = f"📦 Standalone JSON persona pack ready for <code>{char_id}</code>.\nDownload it from AuraCraft Studio: <code>/api/characters/{char_id}/download-pack</code>"
+            try:
+                export_result = export_character_pack(PersonaPackExportRequest(character_id=char_id), None)
+                document_request = (
+                    f"{char_id}_auracraft_pack.json",
+                    json.dumps(export_result["persona_pack"], ensure_ascii=False, indent=2).encode("utf-8"),
+                )
+                reply_text = f"📦 Exported persona pack for <code>{html.escape(char_id)}</code>."
+            except HTTPException as error:
+                reply_text = f"❌ {html.escape(str(error.detail))}"
+    elif command == "/import":
+        action_type = "import"
+        import_url = text.partition(" ")[2].strip()
+        if not import_url:
+            reply_text = "⚠️ Usage: /import <https://allowed-host/path/persona.json>"
+        else:
+            try:
+                package_bytes = await _download_persona_pack(import_url)
+                chars = load_characters()
+                if package_bytes.startswith(b"PK\x03\x04"):
+                    imported = _import_aura_archive(package_bytes, chars)
+                else:
+                    if len(package_bytes) > 2 * 1024 * 1024:
+                        raise HTTPException(status_code=413, detail="JSON persona pack exceeds 2MB")
+                    try:
+                        pack = ManualPersonaPack.model_validate(json.loads(package_bytes))
+                    except (json.JSONDecodeError, ValidationError):
+                        raise HTTPException(status_code=422, detail="Downloaded file is not a valid persona pack")
+                    imported = _import_persona_pack(pack, chars)
+                    if imported["status"] == "imported":
+                        save_characters(chars)
+                if imported["status"] == "imported":
+                    reply_text = f"✅ Imported <b>{html.escape(str(imported.get('actor_name', imported.get('actor_id'))))}</b>."
+                else:
+                    reply_text = f"ℹ️ Character <code>{html.escape(str(imported.get('actor_id', 'unknown')))}</code> already exists."
+            except HTTPException as error:
+                reply_text = f"❌ {html.escape(str(error.detail))}"
 
     if reply_text:
         target_chat = message.get("chat", {}).get("id") or TELEGRAM_GROUP_CHAT_ID
+        audio_file_id = None
+        document_file_id = None
+        if audio_request:
+            audio_file_id = await send_telegram_audio(target_chat, topic_id, await _synthesize_telegram_audio(*audio_request))
+            if not audio_file_id:
+                raise HTTPException(status_code=502, detail="Telegram audio delivery failed")
+        if document_request:
+            document_file_id = await send_telegram_document(target_chat, topic_id, *document_request)
+            if not document_file_id:
+                raise HTTPException(status_code=502, detail="Telegram export delivery failed")
         delivered = await send_telegram_reply(chat_id=target_chat, thread_id=topic_id, text=reply_text)
-        return {"ok": True, "action": action_type, "reply": reply_text, "delivered": delivered, **extra}
+        return {"ok": True, "action": action_type, "reply": reply_text, "delivered": delivered,
+                "audio_file_id": audio_file_id, "document_file_id": document_file_id, **extra}
 
     return {"ok": True, "ignored": "unhandled_command"}
 
@@ -486,7 +908,7 @@ def get_voices():
 
 
 @app.post("/api/tts/synthesize")
-async def synthesize_speech(payload: SynthesizeRequest):
+async def synthesize_speech(payload: SynthesizeRequest, request: Request, _: None = Depends(require_auth), __: None = Depends(enforce_tts_rate_limit)):
     """Zero-cost Neural Speech generation via Microsoft Edge-TTS."""
     try:
         communicate = edge_tts.Communicate(
@@ -499,10 +921,9 @@ async def synthesize_speech(payload: SynthesizeRequest):
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 audio_stream.write(chunk["data"])
-        
         audio_bytes = audio_stream.getvalue()
         if not audio_bytes:
-            raise HTTPException(status_code=500, detail="TTS generation produced empty audio")
+            raise HTTPException(status_code=502, detail="TTS synthesis failed")
             
         return Response(
             content=audio_bytes,
@@ -513,12 +934,15 @@ async def synthesize_speech(payload: SynthesizeRequest):
                 "X-Voice-Used": payload.voice,
             }
         )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"TTS synthesis error: {str(exc)}")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("TTS synthesis failed")
+        raise HTTPException(status_code=500, detail="TTS synthesis failed")
 
 
 @app.post("/api/avatar-video/render-plan")
-def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest):
+def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest, _: None = Depends(require_auth)):
     """Create a local, reviewable avatar-video manifest without rendering or cloud calls."""
     character = next((item for item in load_characters() if item.get("id") == payload.character_id), None)
     if not character:
@@ -532,7 +956,7 @@ def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest):
             "duration_seconds": payload.seconds_per_scene,
             "dialogue": line,
             "emotion": character.get("default_emotion", "neutral"),
-            "voice_id": character["voice_id"],
+            "voice_id": payload.voice_id or character["voice_id"],
             "vrm_model": character["vrm_model"],
         }
         for index, line in enumerate(lines, start=1)
@@ -540,10 +964,10 @@ def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest):
     plan_id = f"plan_{uuid4().hex}"
     plan = {
         "plan_id": plan_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "status": "planned",
         "render_mode": "local-manifest-only",
-        "character": {"id": character["id"], "name": character["name"], "voice_id": character["voice_id"]},
+        "character": {"id": character["id"], "name": character["name"], "voice_id": payload.voice_id or character["voice_id"]},
         "aspect_ratio": payload.aspect_ratio,
         "estimated_duration_seconds": len(scenes) * payload.seconds_per_scene,
         "scenes": scenes,
@@ -581,7 +1005,7 @@ def download_avatar_video_render_plan(plan_id: str):
 
 
 @app.delete("/api/avatar-video/render-plans/{plan_id}")
-def delete_avatar_video_render_plan(plan_id: str):
+def delete_avatar_video_render_plan(plan_id: str, _: None = Depends(require_auth)):
     path = _render_plan_path(plan_id)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Render plan not found")
@@ -632,8 +1056,20 @@ def get_archetypes():
     return styles
 
 
+@app.get("/api/characters/vrm/{actor_id}")
+def get_imported_vrm(actor_id: str):
+    # FIX(audit-2-B): serve imported VRM assets only from the validated persistent asset directory.
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
+        raise HTTPException(status_code=404, detail="VRM asset not found")
+    asset_dir = (DATA_DIR / "imported_vrms").resolve()
+    asset_path = (asset_dir / f"{actor_id}.vrm").resolve()
+    if os.path.commonpath((str(asset_dir), str(asset_path))) != str(asset_dir) or not asset_path.is_file():
+        raise HTTPException(status_code=404, detail="VRM asset not found")
+    return FileResponse(asset_path, media_type="model/gltf-binary", filename=f"{actor_id}.vrm")
+
+
 @app.get("/api/characters")
-def list_characters(style: Optional[str] = Query(None, description="Filter by style archetype")):
+def list_characters(style: str | None = Query(None, description="Filter by style archetype")):
     chars = load_characters()
     if style:
         return [c for c in chars if c.get("style") == style]
@@ -641,7 +1077,7 @@ def list_characters(style: Optional[str] = Query(None, description="Filter by st
 
 
 @app.post("/api/characters")
-def create_character(payload: CharacterCreate):
+def create_character(payload: CharacterCreate, _: None = Depends(require_auth)):
     chars = load_characters()
     char_id = f"char_{payload.style}_{payload.name.lower().replace(' ', '_')}_{len(chars)+1}"
     new_char = {
@@ -662,9 +1098,12 @@ def create_character(payload: CharacterCreate):
     return new_char
 
 
-def _import_persona_pack(pack: ManualPersonaPack, chars: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _import_persona_pack(pack: ManualPersonaPack, chars: list[dict[str, Any]]) -> dict[str, Any]:
     """Import an explicit local pack without overwriting an existing actor."""
+    # FIX(audit-1-C): reject traversal, separators, absolute paths, and null bytes at the trust boundary.
     actor_id = pack.actor_id.strip()
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
+        raise HTTPException(status_code=422, detail="Invalid actor_id")
     if ".." in pack.vrm_model_path or not pack.vrm_model_path.startswith("/models/"):
         raise HTTPException(status_code=422, detail="VRM model path must stay inside /models/")
     if any(character.get("id") == actor_id for character in chars):
@@ -688,7 +1127,7 @@ def _import_persona_pack(pack: ManualPersonaPack, chars: List[Dict[str, Any]]) -
 
 
 @app.post("/api/characters/import-pack")
-def import_persona_pack(pack: ManualPersonaPack):
+def import_persona_pack(pack: ManualPersonaPack, _: None = Depends(require_auth)):
     """Import one user-selected JSON persona pack into AuraCraft only."""
     chars = load_characters()
     result = _import_persona_pack(pack, chars)
@@ -698,7 +1137,7 @@ def import_persona_pack(pack: ManualPersonaPack):
 
 
 @app.post("/api/characters/import-packs")
-def import_persona_packs(batch: ManualPersonaPackBatch):
+def import_persona_packs(batch: ManualPersonaPackBatch, _: None = Depends(require_auth)):
     """Import selected JSON packs atomically; conflicts are reported, never replaced."""
     chars = load_characters()
     results = [_import_persona_pack(pack, chars) for pack in batch.packs]
@@ -712,7 +1151,7 @@ def import_persona_packs(batch: ManualPersonaPackBatch):
 
 
 @app.post("/api/characters/export-pack")
-def export_character_pack(payload: PersonaPackExportRequest):
+def export_character_pack(payload: PersonaPackExportRequest, _: None = Depends(require_auth)):
     """Package a character from AuraCraft Studio into a standalone downloadable JSON asset pack."""
     chars = load_characters()
     target = next((c for c in chars if c["id"] == payload.character_id), None)
@@ -750,9 +1189,25 @@ def export_character_pack(payload: PersonaPackExportRequest):
     # Save standalone downloadable file in AuraCraft's own export folder
     export_dir = DATA_DIR / "exported_packs"
     export_dir.mkdir(parents=True, exist_ok=True)
-    export_file = export_dir / f"{target['id']}_auracraft_pack.json"
-    with open(export_file, "w", encoding="utf-8") as f:
-        json.dump(auracraft_asset_pack, f, indent=2, ensure_ascii=False)
+    actor_id = str(target["id"])
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
+        raise HTTPException(status_code=422, detail="Invalid actor_id")
+    name = f"{actor_id}_auracraft_pack.json"
+    resolved = (export_dir / name).resolve()
+    if os.path.commonpath((str(export_dir.resolve()), str(resolved))) != str(export_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid export path")
+    export_file = resolved
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=export_dir, prefix=".export-", suffix=".tmp", delete=False) as f:
+            temp_name = f.name
+            json.dump(auracraft_asset_pack, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_name, export_file)
+    finally:
+        if temp_name and os.path.exists(temp_name):
+            os.unlink(temp_name)
         
     return {
         "status": "success",

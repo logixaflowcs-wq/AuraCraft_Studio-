@@ -1,30 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { Clapperboard, Video, Plus, Trash2, Download, Check, Sparkles, Smartphone, Monitor, Clock, Play, Loader2 } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
+import { createSceneId } from './videoStudioUtils';
 
 export const VideoStudioPage: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<'9:16' | '16:9'>('9:16');
   const [characterName, setCharacterName] = useState('Shinji Kazama (シンジ)');
+  const [selectedCharacterId, setSelectedCharacterId] = useState('char_anime_shinji');
+  const [availableCharacters, setAvailableCharacters] = useState<Array<{ id: string; name: string; voice_id?: string }>>([]);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [voiceId, setVoiceId] = useState('my-MM-NilarNeural');
   const [durationPerScene, setDurationPerScene] = useState(6);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
-  const [scenes, setScenes] = useState<Array<{ id: number; title: string; script: string; emotion: string; camera: string }>>([
+  const [scenes, setScenes] = useState<Array<{ id: string; title: string; script: string; emotion: string; camera: string }>>([
     {
-      id: 1,
+      id: 'scene-1',
       title: 'Scene 1: Introduction (မိတ်ဆက်)',
       script: 'မင်္ဂလာပါ! ကျွန်တော်တို့ AuraCraft Studio ရဲ့ 3D Persona စနစ်သစ်ကို ကြည့်ရှုဖို့ ကြိုဆိုပါတယ်။',
       emotion: 'happy',
       camera: 'bust',
     },
     {
-      id: 2,
+      id: 'scene-2',
       title: 'Scene 2: Core Briefing (အဓိကအချက်)',
       script: 'ဒီစနစ်က 3D VRM Humanoid အနေနဲ့ရော၊ 2D Portrait အနေနဲ့ပါ မြန်မာလို အသံထွက်ပြီး မျက်နှာ အမူအရာတွေနဲ့ စကားပြောနိုင်ပါတယ်။',
       emotion: 'neutral',
       camera: 'full',
     },
     {
-      id: 3,
+      id: 'scene-3',
       title: 'Scene 3: Conclusion (နိဂုံးချုပ်)',
       script: 'Manga Script တွေ၊ OBS Live တွေအတွက် အချိန်မရွေး သွင်းယူပြီး အသုံးပြုနိုင်ပါပြီခင်ဗျာ။',
       emotion: 'surprised',
@@ -35,13 +39,27 @@ export const VideoStudioPage: React.FC = () => {
   const [generatedPlan, setGeneratedPlan] = useState<any | null>(null);
   const [exported, setExported] = useState(false);
 
+  useEffect(() => {
+    // FIX(audit-3-D): populate casting IDs from the backend rather than hardcoding a request ID.
+    fetch(API_ENDPOINTS.characters).then(async (response) => {
+      if (!response.ok) throw new Error('Character list unavailable');
+      const records = await response.json();
+      if (Array.isArray(records) && records.length) {
+        setAvailableCharacters(records);
+        const selected = records.find((item) => item.id === selectedCharacterId) || records[0];
+        setSelectedCharacterId(selected.id);
+        setCharacterName(selected.name);
+      }
+    }).catch(() => setGenerationError('Character list could not be loaded; check backend availability.'));
+  }, []);
+
   const addScene = () => {
-    const newId = scenes.length + 1;
-    setScenes([
-      ...scenes,
+    const newId = createSceneId();
+    setScenes((current) => [
+      ...current,
       {
         id: newId,
-        title: `Scene ${newId}: Custom Chapter`,
+        title: 'Scene ' + (current.length + 1) + ': Custom Chapter',
         script: 'နောက်ထပ် ဇာတ်ကွက် စာသားကို ဤနေရာတွင် ရေးသားနိုင်ပါသည်။',
         emotion: 'neutral',
         camera: 'bust',
@@ -49,24 +67,27 @@ export const VideoStudioPage: React.FC = () => {
     ]);
   };
 
-  const removeScene = (id: number) => {
+  const removeScene = (id: string) => {
     if (scenes.length <= 1) return;
-    setScenes(scenes.filter((s) => s.id !== id));
+    setScenes((current) => current.filter((s) => s.id !== id));
   };
 
-  const updateScene = (id: number, field: string, val: any) => {
-    setScenes(scenes.map((s) => (s.id === id ? { ...s, [field]: val } : s)));
+  const updateScene = (id: string, field: string, val: any) => {
+    setScenes((current) => current.map((s) => (s.id === id ? { ...s, [field]: val } : s)));
   };
 
   const totalEstimatedSeconds = scenes.length * durationPerScene;
 
   const handleGenerateManifest = async () => {
     setIsGeneratingPlan(true);
+    setGenerationError(null);
+    setGeneratedPlan(null);
     const localManifest = {
       project: 'AuraCraft Studio - Video Render Plan',
       version: '1.0.0',
       aspect_ratio: aspectRatio,
       character: characterName,
+      character_id: selectedCharacterId,
       voice_id: voiceId,
       total_scenes: scenes.length,
       estimated_duration_seconds: totalEstimatedSeconds,
@@ -87,20 +108,20 @@ export const VideoStudioPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          character_id: 'char_anime_shinji',
+          character_id: selectedCharacterId,
+          voice_id: voiceId,
           script: scriptText,
           aspect_ratio: aspectRatio,
           seconds_per_scene: durationPerScene,
         }),
       });
-      if (res.ok) {
-        const plan = await res.json();
-        setGeneratedPlan({ ...localManifest, server_plan: plan });
-      } else {
-        setGeneratedPlan(localManifest);
-      }
-    } catch {
-      setGeneratedPlan(localManifest);
+      if (!res.ok) throw new Error('Backend rejected the render plan (' + res.status + ').');
+      const plan = await res.json();
+      setGeneratedPlan({ ...localManifest, server_plan: plan });
+    } catch (error) {
+      // FIX(audit-3-D): never present a local-only draft as a successful backend render plan.
+      setGeneratedPlan(null);
+      setGenerationError(error instanceof Error ? error.message : 'Render plan generation failed.');
     } finally {
       setIsGeneratingPlan(false);
     }
@@ -258,12 +279,20 @@ export const VideoStudioPage: React.FC = () => {
             <div className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-400 font-medium mb-1">Casting Actor</label>
-                <input
-                  type="text"
-                  value={characterName}
-                  onChange={(e) => setCharacterName(e.target.value)}
+                <select
+                  value={selectedCharacterId}
+                  onChange={(e) => {
+                    const selected = availableCharacters.find((item) => item.id === e.target.value);
+                    setSelectedCharacterId(e.target.value);
+                    if (selected) setCharacterName(selected.name);
+                  }}
                   className="w-full bg-[#0a0d14] border border-[#23314f] rounded-xl px-3 py-2 text-slate-100 text-xs"
-                />
+                >
+                  {availableCharacters.map((character) => (
+                    <option key={character.id} value={character.id}>{character.name}</option>
+                  ))}
+                  {!availableCharacters.length && <option value={selectedCharacterId}>{characterName}</option>}
+                </select>
               </div>
 
               <div>
@@ -283,6 +312,7 @@ export const VideoStudioPage: React.FC = () => {
               </div>
             </div>
 
+            {generationError && <p role="alert" className="text-xs text-rose-300">{generationError}</p>}
             <div className="pt-3 border-t border-[#1f293d] flex gap-2">
               <button
                 onClick={handleGenerateManifest}
