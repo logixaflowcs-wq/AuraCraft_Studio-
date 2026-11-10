@@ -416,6 +416,7 @@ class ManualPersonaPack(BaseModel):
     vrm_model_path: str = Field(default="/models/sample_avatar_a.vrm", max_length=500)
     avatar_color: str = Field(default="#8b5cf6", max_length=20)
     default_emotion: str = Field(default="neutral", max_length=40)
+    # FIX(free-tier-4): preserve Narrativ Forge blendshape mappings on import/export round trips.
     expression_map: dict[str, str] = Field(
         default_factory=lambda: {
             "neutral": "blendshape_neutral",
