@@ -80,7 +80,9 @@ Revalidated after these changes: frontend `npm ci`, lint, 12 Vitest tests, build
 - Pinned psycopg[binary]==3.3.8 for Python 3.11.
 - Changed the Render backend blueprint from paid Starter + persistent disk to the Free plan. The blueprint now expects DATABASE_URL as a private environment variable and uses /tmp/auracraft-data only for temporary files.
 - Removed hardcoded Telegram group/topic identifiers from the public backend health response and source defaults; runtime configuration now uses TELEGRAM_GROUP_CHAT_ID and TELEGRAM_TOPIC_ID.
-- Added focused tests for the Postgres-backed character and render-plan paths.
+- Added focused tests for Postgres-backed character/render-plan persistence and custom VRM asset persistence.
+- Added Neon BYTEA storage for imported VRM files, with a 25MB per-file and 300MB aggregate cap to stay within a conservative free-tier budget.
+- Added Narrativ Forge expression-map preservation for persona-pack import/export round trips.
 - Updated the checked-in Wrangler variables to match the existing Render backend and frontend hostnames.
 
 ### Remaining free-tier deployment gates
@@ -88,6 +90,6 @@ Revalidated after these changes: frontend `npm ci`, lint, 12 Vitest tests, build
 - The Render workspace is My Workspace; service inspection and environment updates are waiting for the user's explicit workspace confirmation.
 - The Render backend still needs DATABASE_URL, API_AUTH_TOKEN, TELEGRAM_WEBHOOK_SECRET, and the Telegram runtime variables configured. No secret values are written to Git.
 - The live Cloudflare Worker currently has a dashboard-managed configuration that differs from the repository. Its ALLOWED_ORIGINS and API_AUTH_TOKEN binding still need to be aligned, then the Worker must be deployed from the audited source.
-- Render Free uses ephemeral local files. Character records and render manifests persist in Neon, but custom VRM files written to the local data directory are not durable yet.
-- The current video endpoint produces a JSON render manifest only. Actual MP4 rendering and the Narrativ Forge integration remain unimplemented.
+- Render Free uses ephemeral local files. Character records, render manifests, and imported VRM binaries persist in Neon. Custom VRM assets are capped at 25MB each and 300MB total; the application returns a clear quota error instead of allowing unbounded storage.
+- The current video endpoint produces a JSON render manifest only; actual MP4 rendering remains unimplemented. Narrativ Forge-compatible persona-pack export/import is supported, including expression-map round trips, but no external Narrativ Forge API integration is configured.
 - The 9 moderate npm audit findings are caused by the minimatch advisory in the ESLint 10 / TypeScript-ESLint toolchain. Do not force an incompatible minimatch major override; the compatible dependency path needs a targeted upstream-compatible update.
