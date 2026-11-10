@@ -61,3 +61,13 @@
 6. Existing localStorage `blob:` URLs from before the migration cannot be reconstructed after their browser session ended; the migration sanitizes stale URLs. Newly uploaded photo/VRM data is stored in IndexedDB.
 7. FastAPI's existing startup `on_event` handlers and Starlette TestClient emit deprecation warnings; they do not fail the current test suite.
 8. GitHub Actions workflows are committed but have not yet executed on GitHub; their commands were run locally where applicable.
+
+
+## Post-PR CI remediation (2026-11-10)
+
+The first GitHub Actions run exposed two environment-only issues that local checks had not caught:
+
+- Root npm workspace globs discovered both `apps/web-platform/frontend` and `apps/web-studio`, which share a package name. Removed the overlapping root workspace declaration so each app and the Worker install from its own lockfile. This does not remove either application.
+- The GitHub runner's preinstalled `setuptools==79.0.1` was vulnerable according to `pip-audit`; pinned the dev environment to `setuptools==84.1.0`, the reported fixed release.
+
+Revalidated after these changes: frontend `npm ci`, lint, 12 Vitest tests, build, and high-severity npm audit gate; Worker `npm ci`, lint, 9 Node tests, Wrangler dry-run, and high-severity npm audit gate; backend pip install, strict pip-audit, Ruff, Mypy, and 48 pytest tests. The updated commit is awaiting a fresh GitHub Actions run.
