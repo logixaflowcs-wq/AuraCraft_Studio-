@@ -36,7 +36,9 @@ from app.persistence import (
     delete_state,
     list_state,
     read_state,
+    read_asset,
     write_state,
+    write_asset,
 )
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
@@ -658,8 +660,9 @@ def _import_aura_archive(archive_bytes: bytes, chars: list[dict[str, Any]]) -> d
                 raise HTTPException(status_code=413, detail="Aura package exceeds expanded size limit")
             if sizes["manifest.json"] > 256 * 1024:
                 raise HTTPException(status_code=413, detail="Aura manifest exceeds 256KB")
-            if sizes["model.vrm"] <= 0 or sizes["model.vrm"] > 100 * 1024 * 1024:
-                raise HTTPException(status_code=413, detail="VRM file exceeds 100MB limit")
+            max_vrm_bytes = 25 * 1024 * 1024 if database_enabled() else 100 * 1024 * 1024
+            if sizes["model.vrm"] <= 0 or sizes["model.vrm"] > max_vrm_bytes:
+                raise HTTPException(status_code=413, detail=f"VRM file exceeds {max_vrm_bytes // (1024 * 1024)}MB limit")
             for image_name in ("thumbnail.png", "reference-sheet.png"):
                 if sizes.get(image_name, 0) > 5 * 1024 * 1024:
                     raise HTTPException(status_code=413, detail="Image asset exceeds 5MB limit")
@@ -696,22 +699,31 @@ def _import_aura_archive(archive_bytes: bytes, chars: list[dict[str, Any]]) -> d
                 raise HTTPException(status_code=422, detail="Aura VRM checksum mismatch")
             if any(str(item.get("id")) == actor_id for item in chars):
                 return {"status": "exists", "actor_id": actor_id, "actor_name": actor_name}
-            asset_dir = DATA_DIR / "imported_vrms"
-            asset_dir.mkdir(parents=True, exist_ok=True)
-            target = (asset_dir / f"{actor_id}.vrm").resolve()
-            if os.path.commonpath((str(asset_dir.resolve()), str(target))) != str(asset_dir.resolve()):
-                raise HTTPException(status_code=400, detail="Invalid VRM storage path")
-            temp_path = None
-            try:
-                with tempfile.NamedTemporaryFile("wb", dir=asset_dir, prefix=".vrm-", suffix=".tmp", delete=False) as handle:
-                    temp_path = handle.name
-                    handle.write(vrm_bytes)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temp_path, target)
-            finally:
-                if temp_path and os.path.exists(temp_path):
-                    os.unlink(temp_path)
+            # FIX(free-tier-5): store custom VRM bytes in Neon on ephemeral Render Free.
+            if database_enabled():
+                try:
+                    write_asset(actor_id, vrm_bytes)
+                except ValueError as error:
+                    raise HTTPException(status_code=413, detail=str(error)) from error
+                except RuntimeError as error:
+                    raise HTTPException(status_code=507, detail=str(error)) from error
+            else:
+                asset_dir = DATA_DIR / "imported_vrms"
+                asset_dir.mkdir(parents=True, exist_ok=True)
+                target = (asset_dir / f"{actor_id}.vrm").resolve()
+                if os.path.commonpath((str(asset_dir.resolve()), str(target))) != str(asset_dir.resolve()):
+                    raise HTTPException(status_code=400, detail="Invalid VRM storage path")
+                temp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile("wb", dir=asset_dir, prefix=".vrm-", suffix=".tmp", delete=False) as handle:
+                        temp_path = handle.name
+                        handle.write(vrm_bytes)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temp_path, target)
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        os.unlink(temp_path)
             character = {
                 "id": actor_id,
                 "name": actor_name.strip(),
@@ -1121,9 +1133,18 @@ def get_archetypes():
 
 @app.get("/api/characters/vrm/{actor_id}")
 def get_imported_vrm(actor_id: str):
-    # FIX(audit-2-B): serve imported VRM assets only from the validated persistent asset directory.
+    # FIX(free-tier-5): serve imported VRM assets from Neon when the host filesystem is ephemeral.
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
         raise HTTPException(status_code=404, detail="VRM asset not found")
+    if database_enabled():
+        found, content, content_type = read_asset(actor_id)
+        if not found or content is None:
+            raise HTTPException(status_code=404, detail="VRM asset not found")
+        return Response(
+            content=content,
+            media_type=content_type or "model/gltf-binary",
+            headers={"Content-Disposition": f'inline; filename="{actor_id}.vrm"', "Cache-Control": "public, max-age=3600"},
+        )
     asset_dir = (DATA_DIR / "imported_vrms").resolve()
     asset_path = (asset_dir / f"{actor_id}.vrm").resolve()
     if os.path.commonpath((str(asset_dir), str(asset_path))) != str(asset_dir) or not asset_path.is_file():
