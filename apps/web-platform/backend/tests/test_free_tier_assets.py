@@ -35,6 +35,7 @@ def test_aura_vrm_import_uses_postgres_storage_on_free_host(monkeypatch):
     saved = {}
 
     monkeypatch.setattr(main, "database_enabled", lambda: True)
+    monkeypatch.setattr(main, "save_characters", lambda _: None)
     monkeypatch.setattr(
         main,
         "write_asset",
