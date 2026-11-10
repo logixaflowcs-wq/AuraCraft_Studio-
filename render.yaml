@@ -40,10 +40,9 @@ services:
     healthCheckPath: /health
 
   - type: web
-    name: auracraft-frontend
+    name: auracraft-studio
     env: static
     region: singapore
-    plan: free
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     rootDir: apps/web-platform/frontend
