@@ -4,6 +4,7 @@ The app keeps its JSON-file adapter for local development and tests. When
 DATABASE_URL is configured, this module persists character records and render
 manifests in Neon Postgres instead of the host's ephemeral filesystem.
 """
+
 from __future__ import annotations
 
 import os
