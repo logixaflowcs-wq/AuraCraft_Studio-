@@ -8,8 +8,8 @@ workers_dev = true
 
 [vars]
 ENVIRONMENT = "production"
-BACKEND_API_URL = "https://auracraft-backend.onrender.com"
-ALLOWED_ORIGINS = "https://auracraft-frontend.onrender.com"
+BACKEND_API_URL = "https://auracraft-backend-dt1u.onrender.com"
+ALLOWED_ORIGINS = "https://auracraft-studio.onrender.com"
 
 [observability]
 enabled = true
