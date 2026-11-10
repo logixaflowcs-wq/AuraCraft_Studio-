@@ -93,3 +93,5 @@ Revalidated after these changes: frontend `npm ci`, lint, 12 Vitest tests, build
 - Render Free uses ephemeral local files. Character records, render manifests, and imported VRM binaries persist in Neon. Custom VRM assets are capped at 25MB each and 300MB total; the application returns a clear quota error instead of allowing unbounded storage.
 - The current video endpoint produces a JSON render manifest only; actual MP4 rendering remains unimplemented. Narrativ Forge-compatible persona-pack export/import is supported, including expression-map round trips, but no external Narrativ Forge API integration is configured.
 - The 9 moderate npm audit findings are caused by the minimatch advisory in the ESLint 10 / TypeScript-ESLint toolchain. Do not force an incompatible minimatch major override; the compatible dependency path needs a targeted upstream-compatible update.
+
+- Validation on the free-tier follow-up: GitHub Actions CI run #38 passed backend, frontend, and Worker jobs; Worker Lint run #31 passed. Backend Ruff and Mypy passed, all 54 pytest tests passed, frontend lint/12 Vitest tests/build passed, and the Worker 9-test suite plus Wrangler dry-run passed.
