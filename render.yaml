@@ -42,7 +42,6 @@ services:
   - type: web
     name: auracraft-studio
     env: static
-    region: singapore
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     rootDir: apps/web-platform/frontend
