@@ -29,12 +29,6 @@ try:
     load_dotenv()
 except ImportError:
     pass
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from filelock import FileLock
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
-
 from app.persistence import (
     check_database,
     database_enabled,
@@ -43,6 +37,12 @@ from app.persistence import (
     read_state,
     write_state,
 )
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from filelock import FileLock
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 logger = logging.getLogger(__name__)
 
