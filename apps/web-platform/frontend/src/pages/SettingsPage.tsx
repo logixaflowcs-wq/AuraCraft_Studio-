@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { clearAllLocalData } from '../db/database';
 import { Settings, Server, CheckCircle2, AlertCircle, RefreshCw, Database, Trash2, Cpu, Globe, Send, ShieldCheck, Loader2 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
@@ -10,11 +11,12 @@ export const SettingsPage: React.FC = () => {
   const checkHealth = async () => {
     setApiStatus('checking');
     try {
-      const res = await fetch((import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/health', { method: 'GET' });
+      const res = await fetch((import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/ready', { method: 'GET' });
       if (res.ok) setApiStatus('online');
       else setApiStatus('offline');
     } catch {
-      setApiStatus('online'); // Server is responding on port 8010
+      // FIX(audit-3-G): a failed readiness request is offline, never a synthetic success.
+      setApiStatus('offline');
     }
   };
 
@@ -24,31 +26,33 @@ export const SettingsPage: React.FC = () => {
 
   const handleTestTelegram = async () => {
     setIsTestingTelegram(true);
-    setTelegramStatus('Pinging Telegram Bridge...');
+    setTelegramStatus('Checking Telegram bot credentials...');
     try {
+      // FIX(audit-3-G): call the backend getMe proxy; /health cannot verify bot credentials.
       const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8010';
-      const res = await fetch(`${baseUrl}/health`);
-      if (res.ok) {
-        const data = await res.json();
-        setTelegramStatus(`✅ Bridge Active: Topic ${data.telegram_topic || 215} (Chat ${data.telegram_chat_id || '-1003992125718'})`);
-      } else {
-        setTelegramStatus('⚠️ Backend online, checking bot credentials');
-      }
+      const res = await fetch(baseUrl + '/api/telegram/test');
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error('Telegram bot check failed');
+      setTelegramStatus('✅ Bot connected: @' + (data.username || 'unknown'));
     } catch {
-      setTelegramStatus('⚡ Local fallback mode (Topic 215 active)');
+      setTelegramStatus('❌ Telegram bot check failed. Verify backend bot configuration.');
     } finally {
       setIsTestingTelegram(false);
     }
   };
 
-  const handleClearCache = () => {
+  const handleClearCache = async () => {
     if (window.confirm('Clear all custom characters and reset to default factory presets?')) {
-      localStorage.removeItem('auracraft_custom_chars');
-      localStorage.removeItem('auracraft_deleted_chars');
-      localStorage.removeItem('auracraft_custom_characters');
-      setCleared(true);
-      setTimeout(() => setCleared(false), 2500);
-      window.location.reload();
+      try {
+        // FIX(audit-3-A): clear every Dexie table as well as localStorage.
+        await clearAllLocalData();
+        localStorage.clear();
+        setCleared(true);
+        window.location.reload();
+      } catch {
+        setCleared(false);
+        setTelegramStatus('❌ Could not clear local database. Close other tabs and retry.');
+      }
     }
   };
 

@@ -69,3 +69,52 @@ test("worker forwards updates to the canonical FastAPI webhook", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("browser API proxy injects the server-side bearer token and forwards client IP", async () => {
+  const originalFetch = globalThis.fetch;
+  let forwarded;
+  globalThis.fetch = async (url, init) => {
+    forwarded = { url: String(url), init };
+    return Response.json({ ok: true });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://worker.example/api/tts/synthesize?mode=test", {
+      method: "POST",
+      headers: {
+        Origin: "https://studio.example.com",
+        "CF-Connecting-IP": "198.51.100.42",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text: "hello" }),
+    }), {
+      BACKEND_API_URL: "https://api.example.com",
+      API_AUTH_TOKEN: "server-only-token",
+      ALLOWED_ORIGINS: "https://studio.example.com",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://studio.example.com");
+    assert.equal(forwarded.url, "https://api.example.com/api/tts/synthesize?mode=test");
+    assert.equal(forwarded.init.headers.get("Authorization"), "Bearer server-only-token");
+    assert.equal(forwarded.init.headers.get("X-Forwarded-For"), "198.51.100.42");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("browser API proxy rejects origins outside the explicit allowlist", async () => {
+  const response = await worker.fetch(new Request("https://worker.example/api/characters", {
+    method: "GET",
+    headers: { Origin: "https://attacker.example" },
+  }), { ALLOWED_ORIGINS: "https://studio.example.com" });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "origin_not_allowed" });
+});
+
+test("browser API proxy answers allowed CORS preflight requests", async () => {
+  const response = await worker.fetch(new Request("https://worker.example/api/characters", {
+    method: "OPTIONS",
+    headers: { Origin: "https://studio.example.com" },
+  }), { ALLOWED_ORIGINS: "https://studio.example.com" });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://studio.example.com");
+});

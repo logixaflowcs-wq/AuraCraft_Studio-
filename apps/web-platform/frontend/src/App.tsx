@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Viewport3D } from './components/Viewport3D';
 import { LivePhotoStage } from './components/LivePhotoStage';
 import { StudioLeftPanel, type StudioCharacter } from './components/StudioLeftPanel';
@@ -17,7 +17,7 @@ import { PhotoAvatarPage } from './pages/PhotoAvatarPage';
 import { ImageToCharPage } from './pages/ImageToCharPage';
 import { LibraryView } from './components/LibraryView';
 import { DetailView } from './components/DetailView';
-import { initDefaultSettings } from './db/database';
+import { initDefaultSettings, storeBlob, getBlob, deleteBlob } from './db/database';
 import { 
   Radio, Sparkles, Layers, Volume2, Clapperboard, Tv, Settings, 
   UserCheck, ShieldCheck, ExternalLink, RefreshCw, Camera, Wand2, Globe, Mic, MicOff,
@@ -67,19 +67,49 @@ export default function App() {
 
   useEffect(() => {
     return () => {
+      // FIX(audit-3-B): release mic and playback graph when the Studio root unmounts.
       lipSync.stopMic();
+      lipSync.dispose();
     };
   }, []);
 
   // Custom Characters and Deleted Preset Character Tracking
-  const [customCharacters, setCustomCharacters] = useState<StudioCharacter[]>(() => {
-    try {
-      const saved = localStorage.getItem('auracraft_custom_chars');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [customCharacters, setCustomCharacters] = useState<StudioCharacter[]>([]);
+  const objectUrlsRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    // FIX(audit-3-A): restore Blob bytes from IndexedDB; localStorage contains only blob IDs.
+    const hydrateCustomCharacters = async () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('auracraft_custom_chars') || '[]') as StudioCharacter[];
+        const hydrated = await Promise.all(saved.map(async (character) => {
+          if (!character.blobId) {
+            return character.url?.startsWith('blob:') ? { ...character, url: '', avatarThumb: '' } : character;
+          }
+          const blob = await getBlob(character.blobId);
+          if (!blob) return { ...character, url: '', avatarThumb: '' };
+          const url = URL.createObjectURL(blob);
+          objectUrlsRef.current.set(character.blobId, url);
+          return { ...character, url, avatarThumb: url };
+        }));
+        if (!cancelled) {
+          setCustomCharacters(hydrated);
+          localStorage.setItem('auracraft_custom_chars', JSON.stringify(hydrated.map((character) =>
+            character.blobId ? { ...character, url: '', avatarThumb: '' } : character
+          )));
+        }
+      } catch {
+        if (!cancelled) setCustomCharacters([]);
+      }
+    };
+    void hydrateCustomCharacters();
+    return () => {
+      cancelled = true;
+      objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      objectUrlsRef.current.clear();
+    };
+  }, []);
 
   const [deletedCharacterIds, setDeletedCharacterIds] = useState<string[]>(() => {
     try {
@@ -90,11 +120,13 @@ export default function App() {
     }
   });
 
-  const handleUploadCustomPhoto = (file: File) => {
+  const handleUploadCustomPhoto = async (file: File) => {
+    const blobId = await storeBlob(file, 'photo');
     const url = URL.createObjectURL(file);
+    objectUrlsRef.current.set(blobId, url);
     const cleanName = file.name.replace(/\.[^/.]+$/, '');
     const newChar: StudioCharacter = {
-      id: `custom_photo_${Date.now()}`,
+      id: `custom_photo_${crypto.randomUUID()}`,
       name: cleanName,
       role: 'Custom Uploaded Photo',
       category: 'photo',
@@ -105,11 +137,14 @@ export default function App() {
       defaultVoice: currentVoice,
       defaultEmotion: 'neutral',
       isCustom: true,
+      blobId,
     };
     const updated = [newChar, ...customCharacters];
     setCustomCharacters(updated);
     try {
-      localStorage.setItem('auracraft_custom_chars', JSON.stringify(updated.slice(0, 10)));
+      localStorage.setItem('auracraft_custom_chars', JSON.stringify(updated.slice(0, 10).map((character) =>
+        character.blobId ? { ...character, url: '', avatarThumb: '' } : character
+      )));
     } catch {}
 
     setStageMode('photo');
@@ -118,11 +153,13 @@ export default function App() {
     setCurrentActorName(cleanName);
   };
 
-  const handleUploadCustomVRM = (file: File) => {
+  const handleUploadCustomVRM = async (file: File) => {
+    const blobId = await storeBlob(file, 'vrm');
     const url = URL.createObjectURL(file);
+    objectUrlsRef.current.set(blobId, url);
     const cleanName = file.name.replace(/\.[^/.]+$/, '');
     const newChar: StudioCharacter = {
-      id: `custom_vrm_${Date.now()}`,
+      id: `custom_vrm_${crypto.randomUUID()}`,
       name: cleanName,
       role: 'Custom 3D Model',
       category: 'realistic',
@@ -133,9 +170,15 @@ export default function App() {
       defaultVoice: currentVoice,
       defaultEmotion: 'neutral',
       isCustom: true,
+      blobId,
     };
     const updated = [newChar, ...customCharacters];
     setCustomCharacters(updated);
+    try {
+      localStorage.setItem('auracraft_custom_chars', JSON.stringify(updated.slice(0, 10).map((character) =>
+        character.blobId ? { ...character, url: '', avatarThumb: '' } : character
+      )));
+    } catch {}
     setStageMode('3d');
     setCurrentModelUrl(url);
     setCurrentModelName(cleanName);
@@ -144,7 +187,7 @@ export default function App() {
 
   const handleImportRPMUrl = (url: string) => {
     const newChar: StudioCharacter = {
-      id: `custom_rpm_${Date.now()}`,
+      id: `custom_rpm_${crypto.randomUUID()}`,
       name: 'Ready Player Me 3D',
       role: 'RPM 3D Avatar',
       category: 'realistic',
@@ -158,6 +201,9 @@ export default function App() {
     };
     const updated = [newChar, ...customCharacters];
     setCustomCharacters(updated);
+    try { localStorage.setItem('auracraft_custom_chars', JSON.stringify(updated.slice(0, 10).map((character) =>
+      character.blobId ? { ...character, url: '', avatarThumb: '' } : character
+    ))); } catch {}
     setStageMode('3d');
     setCurrentModelUrl(url);
     setCurrentModelName('Ready Player Me 3D');
@@ -167,10 +213,19 @@ export default function App() {
   const handleDeleteCharacter = (id: string) => {
     const isCustom = customCharacters.some(c => c.id === id);
     if (isCustom) {
+      const removed = customCharacters.find((character) => character.id === id);
+      if (removed?.blobId) {
+        void deleteBlob(removed.blobId).catch(() => undefined);
+        const objectUrl = objectUrlsRef.current.get(removed.blobId);
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrlsRef.current.delete(removed.blobId);
+      }
       const nextCustom = customCharacters.filter(c => c.id !== id);
       setCustomCharacters(nextCustom);
       try {
-        localStorage.setItem('auracraft_custom_chars', JSON.stringify(nextCustom));
+        localStorage.setItem('auracraft_custom_chars', JSON.stringify(nextCustom.map((character) =>
+          character.blobId ? { ...character, url: '', avatarThumb: '' } : character
+        )));
       } catch {}
     } else {
       const nextDeleted = [...deletedCharacterIds, id];
@@ -213,7 +268,13 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('obs') === 'true') {
       setIsOBSMode(true);
-      setBgMode('transparent');
+      // FIX(audit-3-F): honor the Broadcast page's selected OBS background query parameter.
+      const requestedBg = params.get('bg');
+      if (requestedBg === 'transparent' || requestedBg === 'greenscreen' || requestedBg === 'cyber') {
+        setBgMode(requestedBg);
+      } else {
+        setBgMode('transparent');
+      }
     }
   }, []);
 

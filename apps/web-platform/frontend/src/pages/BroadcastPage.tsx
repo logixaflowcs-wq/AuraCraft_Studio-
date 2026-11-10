@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { buildObsSourceUrl } from './broadcastUtils';
 import { Tv, Copy, Check, ExternalLink, ShieldCheck, Monitor, Sparkles, Layers, Sliders } from 'lucide-react';
 
 export const BroadcastPage: React.FC = () => {
@@ -6,7 +7,8 @@ export const BroadcastPage: React.FC = () => {
   const [streamBg, setStreamBg] = useState<'transparent' | 'greenscreen' | 'cyber'>('transparent');
   const [resolution, setResolution] = useState('1080p');
 
-  const obsUrl = `${window.location.origin}/?obs=true&bg=${streamBg}`;
+  // FIX(audit-3-F): include both selected background and resolution in the OBS source URL.
+  const obsUrl = buildObsSourceUrl(window.location.origin, streamBg, resolution);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(obsUrl);
@@ -116,7 +118,16 @@ export const BroadcastPage: React.FC = () => {
             <div className="grid grid-cols-3 gap-3 text-xs">
               <div className="bg-[#0a0d14] p-3 rounded-xl border border-[#23314f]">
                 <span className="text-[10px] text-slate-400 block">Resolution</span>
-                <span className="font-bold text-slate-200">1920 &times; 1080 (FHD)</span>
+                <select
+                  aria-label="OBS resolution"
+                  value={resolution}
+                  onChange={(event) => setResolution(event.target.value)}
+                  className="mt-1 w-full bg-[#111726] border border-[#23314f] rounded-lg px-2 py-1 text-slate-200"
+                >
+                  <option value="1080p">1920 × 1080 (FHD)</option>
+                  <option value="720p">1280 × 720 (HD)</option>
+                  <option value="480p">854 × 480 (SD)</option>
+                </select>
               </div>
               <div className="bg-[#0a0d14] p-3 rounded-xl border border-[#23314f]">
                 <span className="text-[10px] text-slate-400 block">Target Framerate</span>

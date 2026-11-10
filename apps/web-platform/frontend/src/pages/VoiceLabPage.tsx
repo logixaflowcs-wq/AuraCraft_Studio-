@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, Play, Download, Mic, Radio, Sparkles, Sliders, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { lipSync } from '../audio/lipSyncAnalyzer';
+import { formatTtsRatePitch } from './voiceLabUtils';
 
 export const VoiceLabPage: React.FC = () => {
   const [selectedVoice, setSelectedVoice] = useState('my-MM-NilarNeural');
@@ -10,6 +11,13 @@ export const VoiceLabPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => () => {
+    // FIX(audit-3-B): release the audio graph and current object URL on unmount.
+    lipSync.dispose();
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+  }, []);
 
   const VOICES = [
     {
@@ -87,18 +95,23 @@ export const VoiceLabPage: React.FC = () => {
 
     try {
       const backendUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/api/tts/synthesize';
+      const ttsSettings = formatTtsRatePitch(rate, pitch);
       const res = await fetch(backendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: inputText,
           voice: selectedVoice,
+          // FIX(audit-3-E): send selected rate and pitch in Edge-TTS format.
+          ...ttsSettings,
         }),
       });
 
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
+        if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = url;
         setAudioBlobUrl(url);
 
         const audio = new Audio(url);
@@ -106,8 +119,8 @@ export const VoiceLabPage: React.FC = () => {
         lipSync.resume();
 
         setIsPlaying(true);
-        audio.onended = () => setIsPlaying(false);
-        audio.onerror = () => setIsPlaying(false);
+        audio.onended = () => { lipSync.dispose(); setIsPlaying(false); };
+        audio.onerror = () => { lipSync.dispose(); setIsPlaying(false); };
         await audio.play();
       } else {
         // Web Speech API fallback

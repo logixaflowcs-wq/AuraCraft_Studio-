@@ -18,25 +18,36 @@ export class LipSyncAnalyzer {
   private isRunning: boolean = false;
   private micStream: MediaStream | null = null;
   private micSource: MediaStreamAudioSourceNode | null = null;
+  private mediaSource: MediaElementAudioSourceNode | null = null;
+  private mediaSources = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
 
   public init(audioElement?: HTMLAudioElement): void {
-    if (this.audioCtx) return;
-
+    // FIX(audit-3-B): keep one AudioContext but reconnect an analyser source for every playback element.
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    this.audioCtx = new AudioContextClass();
-    this.analyser = this.audioCtx.createAnalyser();
-    this.analyser.fftSize = 512;
-    this.analyser.smoothingTimeConstant = 0.5;
+    this.audioCtx ??= new AudioContextClass();
+    if (!this.analyser) {
+      this.analyser = this.audioCtx.createAnalyser();
+      this.analyser.fftSize = 512;
+      this.analyser.smoothingTimeConstant = 0.5;
+      this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+    }
 
-    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-
+    if (this.mediaSource) {
+      this.mediaSource.disconnect();
+      this.mediaSource = null;
+    }
     if (audioElement) {
       try {
-        const source = this.audioCtx.createMediaElementSource(audioElement);
+        let source = this.mediaSources.get(audioElement);
+        if (!source) {
+          source = this.audioCtx.createMediaElementSource(audioElement);
+          this.mediaSources.set(audioElement, source);
+        }
         source.connect(this.analyser);
+        this.mediaSource = source;
         this.analyser.connect(this.audioCtx.destination);
       } catch (err) {
-        console.warn('[LipSync] Element source already connected or failed:', err);
+        console.warn('[LipSync] Element source connection failed:', err);
       }
     }
     this.isRunning = true;
@@ -134,11 +145,20 @@ export class LipSyncAnalyzer {
   }
 
   public dispose(): void {
-    this.stopMic();
-    this.isRunning = false;
-    if (this.audioCtx) {
-      this.audioCtx.close();
-      this.audioCtx = null;
+    // FIX(audit-3-B): disconnect per-playback nodes on end while retaining the shared context for later elements.
+    if (this.mediaSource) {
+      this.mediaSource.disconnect();
+      this.mediaSource = null;
+    }
+    // Keep a live analyser if the microphone still owns it; otherwise release and suspend playback resources.
+    if (!this.micSource) {
+      this.isRunning = false;
+      if (this.analyser) {
+        this.analyser.disconnect();
+        this.analyser = null;
+        this.dataArray = null;
+      }
+      void this.audioCtx?.suspend();
     }
   }
 }

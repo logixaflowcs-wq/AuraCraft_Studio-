@@ -190,3 +190,36 @@ def test_telegram_import_rejects_non_https_urls(monkeypatch):
     with pytest.raises(HTTPException) as error:
         asyncio.run(main._download_persona_pack("http://trusted.example/persona.json"))
     assert error.value.status_code == 422
+
+
+def test_telegram_get_me_proxy_returns_only_public_bot_identity(monkeypatch):
+    import asyncio
+
+    from app import main
+
+    class FakeResponse:
+        is_success = True
+
+        @staticmethod
+        def json():
+            return {"ok": True, "result": {"username": "auracraft_test_bot", "first_name": "AuraCraft", "token": "must-not-leak"}}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            assert url.endswith("/getMe")
+            return FakeResponse()
+
+    monkeypatch.setattr(main, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeClient)
+    result = asyncio.run(main.telegram_bot_test())
+    assert result == {"ok": True, "username": "auracraft_test_bot", "first_name": "AuraCraft"}
+    assert "token" not in result

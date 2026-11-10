@@ -61,6 +61,8 @@ Use Telegram's Bot API with the same two private values; do not place either cre
 
 You are all set! AuraCraft Studio Bot will now respond inside Topic #215 at zero cost.
 
-## Webhook gateway configuration
+## Edge gateway configuration
 
-Set `BACKEND_API_URL` to the HTTPS origin of the FastAPI deployment. The Worker validates the Telegram webhook secret and forwards the original update to `/api/telegram/webhook`; FastAPI is the only command processor and owns the Telegram bot token. Do not register both Worker and FastAPI as separate Telegram webhook destinations.
+Set `BACKEND_API_URL` to the HTTPS origin of the FastAPI deployment and `ALLOWED_ORIGINS` to the exact comma-separated frontend origins. The Worker validates Telegram webhook requests and forwards them to `/api/telegram/webhook`; FastAPI is the only command processor and owns the Telegram bot token.
+
+For browser API calls, the Worker proxies paths to FastAPI and injects the server-side `API_AUTH_TOKEN`. Configure the same strong token as a Worker secret and backend environment variable. Set frontend `VITE_API_URL` to the Worker origin; never set `VITE_API_AUTH_TOKEN` or put the bearer token in a browser bundle. Do not register both Worker and FastAPI as separate Telegram webhook destinations.

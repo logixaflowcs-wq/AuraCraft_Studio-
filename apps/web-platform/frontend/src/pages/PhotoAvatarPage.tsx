@@ -5,6 +5,8 @@ import {
   Wand2, Image, ChevronRight, Loader2, Play, User, Trash2
 } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
+import { useObjectUrl } from '../hooks/useObjectUrl';
+import { limitPollinationsPrompt } from './photoAvatarUtils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TabMode = 'photo' | 'prompt';
@@ -150,7 +152,11 @@ export const PhotoAvatarPage: React.FC = () => {
   const [tab, setTab] = useState<TabMode>('photo');
 
   // ── Photo Mode State ──
-  const [photoUrl, setPhotoUrl]       = useState<string | null>(null);
+  const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
+  const [generatedPhotoUrl, setGeneratedPhotoUrl] = useState<string | null>(null);
+  // FIX(audit-3-A): uploaded image URLs are created lazily and revoked by the hook.
+  const uploadedPhotoUrl = useObjectUrl(photoBlob);
+  const photoUrl = generatedPhotoUrl || uploadedPhotoUrl;
   const [photoName, setPhotoName]     = useState('');
   const [isDragging, setIsDragging]   = useState(false);
   const [expression, setExpression]   = useState<ExpressionId>('neutral');
@@ -238,16 +244,20 @@ export const PhotoAvatarPage: React.FC = () => {
 
   // ─── Load Photo ──────────────────────────────────────────────────────────
   const loadPhoto = useCallback((file: File) => {
-    const url = URL.createObjectURL(file);
-    const img = new window.Image();
-    img.onload = () => {
-      imgRef.current = img;
-      setPhotoUrl(url);
-      setPhotoName(file.name);
-      setStatusMsg('✅ ပုံ load ပြီး — Generate & Speak နှိပ်ပါ');
-    };
-    img.src = url;
+    // FIX(audit-3-A): keep the Blob as state; useObjectUrl owns URL creation and cleanup.
+    setGeneratedPhotoUrl(null);
+    setPhotoBlob(file);
+    setPhotoName(file.name);
+    setStatusMsg('✅ ပုံ load ပြီး — Generate & Speak နှိပ်ပါ');
   }, []);
+
+  useEffect(() => {
+    if (!uploadedPhotoUrl) return;
+    const img = new window.Image();
+    img.onload = () => { imgRef.current = img; };
+    img.src = uploadedPhotoUrl;
+    return () => { img.onload = null; };
+  }, [uploadedPhotoUrl]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -348,7 +358,7 @@ export const PhotoAvatarPage: React.FC = () => {
   // ─── Prompt Image Generation (Pollinations.ai — Free) ───────────────────
   const handlePromptGenerate = async () => {
     const style = PROMPT_STYLES.find(s => s.id === promptStyle);
-    const fullPrompt = `${promptText}, ${style?.example ?? ''}, high quality, detailed face, portrait`;
+    const fullPrompt = limitPollinationsPrompt(`${promptText}, ${style?.example ?? ''}, high quality, detailed face, portrait`);
     if (!promptText.trim()) { setStatusMsg('⚠️ Prompt ရိုက်ပါ'); return; }
 
     setIsPromptLoading(true);
@@ -368,7 +378,7 @@ export const PhotoAvatarPage: React.FC = () => {
         setGeneratedImgUrl(url);
         setIsPromptLoading(false);
         setStatusMsg('✅ AI Avatar ထွက်ပါပြီ — Generate & Speak နှိပ်ပါ');
-        setPhotoUrl(url);            // Can use in photo mode too
+        setGeneratedPhotoUrl(url);   // FIX(audit-3-A): generated remote URL is not a persisted Blob URL.
       };
       img.onerror = () => {
         setIsPromptLoading(false);
@@ -595,7 +605,8 @@ export const PhotoAvatarPage: React.FC = () => {
                   </button>
 
                   <button onClick={() => {
-                    setPhotoUrl(null);
+                    setPhotoBlob(null);
+                    setGeneratedPhotoUrl(null);
                     setStatusMsg('🗑️ ဓာတ်ပုံကို ဖျက်ပြီးပါပြီ');
                   }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 hover:bg-rose-900/60 text-xs transition-all shadow-sm">
@@ -716,9 +727,12 @@ export const PhotoAvatarPage: React.FC = () => {
                 {/* Prompt text */}
                 <div>
                   <div className="text-[11px] text-slate-500 mb-1.5 font-semibold uppercase tracking-wide">Prompt (ဖော်ပြချက်)</div>
+                  {/* FIX(audit-3-H): disclose third-party prompt processing and enforce the 1000-character cap. */}
+                  <p className="text-[10px] text-amber-300 mb-1">Prompts are sent to Pollinations.ai (third-party). Maximum 1000 characters.</p>
                   <textarea
                     value={promptText}
-                    onChange={e => setPromptText(e.target.value)}
+                    maxLength={1000}
+                    onChange={e => setPromptText(limitPollinationsPrompt(e.target.value))}
                     rows={3}
                     placeholder={`ဥပမာ: ${PROMPT_STYLES.find(s => s.id === promptStyle)?.example}`}
                     className="w-full bg-[#111726] border border-[#1f293d] rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-pink-500/60 focus:ring-1 focus:ring-pink-500/30"

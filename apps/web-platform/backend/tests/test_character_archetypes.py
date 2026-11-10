@@ -137,6 +137,7 @@ def test_avatar_video_render_plan_is_local_and_character_bound(monkeypatch, tmp_
     created = client.post("/api/characters", json={"name": "Local Presenter", "voice_id": "my-MM-NilarNeural"}).json()
     response = client.post("/api/avatar-video/render-plan", json={
         "character_id": created["id"],
+        "voice_id": "en-US-JennyNeural",
         "script": "Hello world\nThis is a local render plan.",
         "aspect_ratio": "9:16",
         "seconds_per_scene": 5,
@@ -146,6 +147,8 @@ def test_avatar_video_render_plan_is_local_and_character_bound(monkeypatch, tmp_
     plan = response.json()
     assert plan["render_mode"] == "local-manifest-only"
     assert plan["character"]["id"] == created["id"]
+    assert plan["character"]["voice_id"] == "en-US-JennyNeural"
+    assert plan["scenes"][0]["voice_id"] == "en-US-JennyNeural"
     assert plan["estimated_duration_seconds"] == 10
     assert len(plan["scenes"]) == 2
     listed = client.get("/api/avatar-video/render-plans")

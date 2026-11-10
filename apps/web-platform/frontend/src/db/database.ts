@@ -9,6 +9,15 @@
 import Dexie, { type Table } from 'dexie';
 import type { Character, Project, Snapshot, AuraSettings } from '../types/character';
 
+
+// FIX(audit-3-A): blob metadata is persisted; blob bytes never enter localStorage.
+export interface BlobRecord {
+  id: string;
+  kind: 'photo' | 'vrm' | 'thumbnail' | 'reference-sheet';
+  blob: Blob;
+  createdAt: Date;
+}
+
 // ─────────────────────────────────────────────
 // Database Class
 // ─────────────────────────────────────────────
@@ -36,6 +45,7 @@ class AuraDatabase extends Dexie {
    * Index: id (PK)
    */
   settings!: Table<AuraSettings, string>;
+  blobs!: Table<BlobRecord, string>;
 
   constructor() {
     super('AuraDatabase');
@@ -54,6 +64,15 @@ class AuraDatabase extends Dexie {
       projects: 'id, name, createdAt',
       snapshots: 'id, characterId, createdAt',
       settings: 'id',
+    });
+
+    // FIX(audit-3-A): isolate uploaded photo and VRM blobs in a dedicated IndexedDB table.
+    this.version(2).stores({
+      characters: 'id, name, style, createdAt, isFavorite, *tags, *projectIds',
+      projects: 'id, name, createdAt',
+      snapshots: 'id, characterId, createdAt',
+      settings: 'id',
+      blobs: 'id, kind, createdAt',
     });
   }
 }
@@ -80,4 +99,31 @@ export async function initDefaultSettings(): Promise<void> {
       language: 'en',
     });
   }
+}
+
+// FIX(audit-3-A): centralize blob persistence and complete local reset operations.
+export async function storeBlob(blob: Blob, kind: BlobRecord['kind']): Promise<string> {
+  const id = crypto.randomUUID();
+  await db.blobs.put({ id, kind, blob, createdAt: new Date() });
+  return id;
+}
+
+export async function getBlob(id: string): Promise<Blob | undefined> {
+  return (await db.blobs.get(id))?.blob;
+}
+
+export async function deleteBlob(id: string): Promise<void> {
+  await db.blobs.delete(id);
+}
+
+export async function clearAllLocalData(): Promise<void> {
+  await db.transaction('rw', db.characters, db.projects, db.snapshots, db.settings, db.blobs, async () => {
+    await Promise.all([
+      db.characters.clear(),
+      db.projects.clear(),
+      db.snapshots.clear(),
+      db.settings.clear(),
+      db.blobs.clear(),
+    ]);
+  });
 }

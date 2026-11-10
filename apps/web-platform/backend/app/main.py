@@ -74,11 +74,21 @@ def require_auth(authorization: str | None = Header(default=None)) -> None:
 _tts_rate_lock = threading.Lock()
 _tts_rate_events: dict[str, deque[float]] = defaultdict(deque)
 def enforce_tts_rate_limit(request: Request, authorization: str | None = Header(default=None)) -> None:
-    client_ip = request.client.host if request.client else "unknown"
+    # FIX(audit-1-E): the edge gateway overwrites this header with Cloudflare's client IP.
+    client_ip = request.headers.get("X-Forwarded-For") or (request.client.host if request.client else "unknown")
     token_fingerprint = hmac.new(os.getenv("API_AUTH_TOKEN", "").encode(), (authorization or "").encode(), "sha256").hexdigest()
     key = f"{client_ip}:{token_fingerprint}"
     now = time.monotonic()
     with _tts_rate_lock:
+        # FIX(audit-1-E): cap per-process key cardinality and evict expired buckets under high-cardinality traffic.
+        if key not in _tts_rate_events and len(_tts_rate_events) >= 10000:
+            for stale_key, stale_events in list(_tts_rate_events.items()):
+                while stale_events and now - stale_events[0] >= 60:
+                    stale_events.popleft()
+                if not stale_events:
+                    _tts_rate_events.pop(stale_key, None)
+            if len(_tts_rate_events) >= 10000:
+                _tts_rate_events.pop(next(iter(_tts_rate_events)))
         events = _tts_rate_events[key]
         while events and now - events[0] >= 60:
             events.popleft()
@@ -326,6 +336,8 @@ class SynthesizeRequest(BaseModel):
 
 class AvatarVideoPlanRequest(BaseModel):
     character_id: str = Field(min_length=1, max_length=120)
+    # FIX(audit-3-D): optional field preserves old clients while retaining selected voice metadata.
+    voice_id: str | None = Field(default=None, max_length=100)
     script: str = Field(min_length=1, max_length=10000)
     aspect_ratio: str = Field(default="9:16", pattern=r"^(9:16|16:9|1:1)$")
     seconds_per_scene: int = Field(default=6, ge=2, le=30)
@@ -390,6 +402,27 @@ def health_check():
         "telegram_topic": 215,
         "telegram_chat_id": "-1003992125718",
     }
+
+
+@app.get("/api/telegram/test")
+async def telegram_bot_test():
+    # FIX(audit-3-G): proxy Telegram getMe server-side without exposing the bot token to the browser.
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    if not token:
+        raise HTTPException(status_code=503, detail="Telegram bot is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+        payload = response.json()
+        if not response.is_success or not payload.get("ok"):
+            raise HTTPException(status_code=502, detail="Telegram bot check failed")
+        bot = payload.get("result", {})
+        return {"ok": True, "username": bot.get("username"), "first_name": bot.get("first_name")}
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError):
+        logger.exception("Telegram getMe check failed")
+        raise HTTPException(status_code=502, detail="Telegram bot check failed")
 
 
 @app.get("/ready")
@@ -786,7 +819,7 @@ def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest, _: None = D
             "duration_seconds": payload.seconds_per_scene,
             "dialogue": line,
             "emotion": character.get("default_emotion", "neutral"),
-            "voice_id": character["voice_id"],
+            "voice_id": payload.voice_id or character["voice_id"],
             "vrm_model": character["vrm_model"],
         }
         for index, line in enumerate(lines, start=1)
@@ -797,7 +830,7 @@ def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest, _: None = D
         "created_at": datetime.now(UTC).isoformat(),
         "status": "planned",
         "render_mode": "local-manifest-only",
-        "character": {"id": character["id"], "name": character["name"], "voice_id": character["voice_id"]},
+        "character": {"id": character["id"], "name": character["name"], "voice_id": payload.voice_id or character["voice_id"]},
         "aspect_ratio": payload.aspect_ratio,
         "estimated_duration_seconds": len(scenes) * payload.seconds_per_scene,
         "scenes": scenes,

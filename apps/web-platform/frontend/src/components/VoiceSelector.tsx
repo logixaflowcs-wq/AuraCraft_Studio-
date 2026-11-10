@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, Mic, Play, Loader2, Download, Sliders, Sparkles, MessageSquare } from 'lucide-react';
 import { lipSync } from '../audio/lipSyncAnalyzer';
 import { translations, type Language } from '../utils/i18n';
@@ -22,6 +22,13 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
   const [pitch, setPitch] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [lastAudioUrl, setLastAudioUrl] = useState<string | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => () => {
+    // FIX(audit-3-B): disconnect audio nodes and revoke the current playback URL on unmount.
+    lipSync.dispose();
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+  }, []);
 
   const voices = [
     { id: 'my-MM-NilarNeural', name: 'Nilar (နီလာ)', lang: 'Myanmar ♀', flag: '🇲🇲', desc: 'Natural Female' },
@@ -64,6 +71,8 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
       if (res.ok) {
         const blob = await res.blob();
         const audioUrl = URL.createObjectURL(blob);
+        if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = audioUrl;
         setLastAudioUrl(audioUrl);
         const audio = new Audio(audioUrl);
 
@@ -71,8 +80,8 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
         lipSync.resume();
 
         onSpeakingStateChange(true);
-        audio.onended = () => onSpeakingStateChange(false);
-        audio.onerror = () => onSpeakingStateChange(false);
+        audio.onended = () => { lipSync.dispose(); onSpeakingStateChange(false); };
+        audio.onerror = () => { lipSync.dispose(); onSpeakingStateChange(false); };
         await audio.play();
       } else {
         // Fallback

@@ -17,6 +17,7 @@ export interface StudioCharacter {
   defaultVoice: string;
   defaultEmotion: string;
   isCustom?: boolean;
+  blobId?: string;
 }
 
 export const ALL_STUDIO_CHARACTERS: StudioCharacter[] = [
