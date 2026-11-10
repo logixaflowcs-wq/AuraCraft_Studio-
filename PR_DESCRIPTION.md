@@ -16,10 +16,10 @@
 
 ## Validation
 
-- GitHub Actions CI run #38: backend, frontend, and Worker jobs all passed.
+- GitHub Actions CI run #40: backend, frontend, and Worker jobs all passed.
 - Backend: Ruff passed, Mypy passed, **54 pytest tests passed**.
 - Frontend: ESLint passed, **12 Vitest tests passed**, production build passed.
-- Worker: **9 Node tests passed**, Wrangler dry-run passed; Worker Lint run #31 passed.
+- Worker: **9 Node tests passed**, Wrangler dry-run passed; Worker Lint run #33 passed.
 - Python dependency audit passed. NPM high-severity gate passed; **9 moderate** development-toolchain findings remain, with no high/critical findings.
 
 ## Free deployment setup
