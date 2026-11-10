@@ -3,31 +3,31 @@ services:
     name: auracraft-backend
     env: python
     region: singapore
-    # Persistent disks require a paid Render service; this is not deployed by this audit.
-    plan: starter
+    # FIX(free-tier-1): keep the API on Render Free; persistent app state is stored in Neon Postgres.
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    disk:
-      name: auracraft-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
       - key: APP_ENV
         value: production
       - key: AURACRAFT_DATA_DIR
-        value: /data
+        value: /tmp/auracraft-data
+      - key: DATABASE_URL
+        sync: false
+      - key: REQUIRE_DATABASE_URL
+        value: "true"
       - key: BACKEND_PUBLIC_URL
-        value: https://auracraft-backend.onrender.com
+        value: https://auracraft-backend-dt1u.onrender.com
       - key: ALLOWED_ORIGINS
-        value: https://auracraft-frontend.onrender.com
+        value: https://auracraft-studio.onrender.com
       - key: TELEGRAM_GROUP_CHAT_ID
-        value: "-1003992125718"
+        sync: false
       - key: TELEGRAM_TOPIC_ID
-        value: "215"
+        sync: false
       - key: TELEGRAM_ALLOWED_USER_IDS
-        value: "1686310706,6759217947"
+        sync: false
       - key: API_AUTH_TOKEN
         sync: false
       - key: TELEGRAM_BOT_TOKEN
@@ -48,6 +48,5 @@ services:
     staticPublishPath: dist
     rootDir: apps/web-platform/frontend
     envVars:
-      # Set this to the deployed Cloudflare Worker origin in the Render dashboard.
       - key: VITE_API_URL
-        sync: false
+        value: https://auracraft-studio-telegram-worker.auracraftstudio.workers.dev

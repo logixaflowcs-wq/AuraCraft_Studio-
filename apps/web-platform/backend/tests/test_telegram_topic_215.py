@@ -18,6 +18,9 @@ def telegram_test_configuration(monkeypatch):
     from app import main
 
     monkeypatch.setattr(main, "TELEGRAM_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setattr(main, "TELEGRAM_TOPIC_ID", 215)
+    monkeypatch.setattr(main, "TELEGRAM_GROUP_CHAT_ID", "-1003992125718")
+    monkeypatch.setattr(main, "TELEGRAM_BOT_TOKEN", "test-bot-token")
     monkeypatch.delenv("TELEGRAM_ALLOWED_USER_IDS", raising=False)
 
     async def fake_audio(text, voice):
@@ -40,8 +43,9 @@ def test_telegram_health_topic_215():
     assert res.status_code == 200
     data = res.json()
     assert data["service"] == "AuraCraft Studio Backend"
-    assert data["telegram_topic"] == 215
-    assert data["telegram_chat_id"] == "-1003992125718"
+    assert data["telegram_configured"] is True
+    assert "telegram_topic" not in data
+    assert "telegram_chat_id" not in data
 
 
 def test_telegram_valid_topic_215_status():

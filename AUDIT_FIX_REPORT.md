@@ -57,10 +57,10 @@
 2. Configure the same `TELEGRAM_WEBHOOK_SECRET` in Render and Worker secrets; keep `TELEGRAM_BOT_TOKEN` only in the backend.
 3. Set `VITE_API_URL` in the Render frontend dashboard to the deployed Worker origin. Set `ALLOWED_ORIGINS` to the exact frontend origin in both Render and Worker.
 4. Set `TELEGRAM_IMPORT_ALLOWED_HOSTS` to the exact trusted HTTPS hostnames from which Telegram `/import` may download packages.
-5. Render Starter is a paid plan required for the persistent disk. No service was deployed and no paid resource was created by this audit.
+5. The original Render Starter + disk configuration was not deployed. A later free-tier follow-up removes the paid disk dependency and uses Neon Postgres for character and render-plan persistence.
 6. Existing localStorage `blob:` URLs from before the migration cannot be reconstructed after their browser session ended; the migration sanitizes stale URLs. Newly uploaded photo/VRM data is stored in IndexedDB.
 7. FastAPI's existing startup `on_event` handlers and Starlette TestClient emit deprecation warnings; they do not fail the current test suite.
-8. GitHub Actions workflows are committed but have not yet executed on GitHub; their commands were run locally where applicable.
+8. GitHub Actions run #14 on main passed backend, frontend, and Worker jobs; Worker Lint run #6 also passed.
 
 
 ## Post-PR CI remediation (2026-11-10)
@@ -70,4 +70,28 @@ The first GitHub Actions run exposed two environment-only issues that local chec
 - Root npm workspace globs discovered both `apps/web-platform/frontend` and `apps/web-studio`, which share a package name. Removed the overlapping root workspace declaration so each app and the Worker install from its own lockfile. This does not remove either application.
 - The GitHub runner's preinstalled `setuptools==79.0.1` was vulnerable according to `pip-audit`; pinned the dev environment to `setuptools==84.1.0`, the reported fixed release.
 
-Revalidated after these changes: frontend `npm ci`, lint, 12 Vitest tests, build, and high-severity npm audit gate; Worker `npm ci`, lint, 9 Node tests, Wrangler dry-run, and high-severity npm audit gate; backend pip install, strict pip-audit, Ruff, Mypy, and 48 pytest tests. The updated commit is awaiting a fresh GitHub Actions run.
+Revalidated after these changes: frontend `npm ci`, lint, 12 Vitest tests, build, and high-severity npm audit gate; Worker `npm ci`, lint, 9 Node tests, Wrangler dry-run, and high-severity npm audit gate; backend pip install, strict pip-audit, Ruff, Mypy, and 48 pytest tests. The updated commit was verified by GitHub Actions run #14: backend, frontend, and Worker jobs all passed; Worker Lint run #6 passed.
+
+
+## Free-tier production-readiness follow-up (2026-11-10)
+
+- Created a Neon Free project in AWS Singapore (aws-ap-southeast-1) and initialized the auracraft_state JSONB table.
+- Added an optional Postgres persistence adapter (DATABASE_URL) for characters and video render manifests. Local development and tests retain the existing JSON-file fallback.
+- Pinned psycopg[binary]==3.3.8 for Python 3.11.
+- Changed the Render backend blueprint from paid Starter + persistent disk to the Free plan. The blueprint now expects DATABASE_URL as a private environment variable and uses /tmp/auracraft-data only for temporary files.
+- Removed hardcoded Telegram group/topic identifiers from the public backend health response and source defaults; runtime configuration now uses TELEGRAM_GROUP_CHAT_ID and TELEGRAM_TOPIC_ID.
+- Added focused tests for Postgres-backed character/render-plan persistence and custom VRM asset persistence.
+- Added Neon BYTEA storage for imported VRM files, with a 25MB per-file and 300MB aggregate cap to stay within a conservative free-tier budget.
+- Added Narrativ Forge expression-map preservation for persona-pack import/export round trips.
+- Updated the checked-in Wrangler variables to match the existing Render backend and frontend hostnames.
+
+### Remaining free-tier deployment gates
+
+- The Render workspace is My Workspace; service inspection and environment updates are waiting for the user's explicit workspace confirmation.
+- The Render backend still needs DATABASE_URL, API_AUTH_TOKEN, TELEGRAM_WEBHOOK_SECRET, and the Telegram runtime variables configured. No secret values are written to Git.
+- The live Cloudflare Worker currently has a dashboard-managed configuration that differs from the repository. Its ALLOWED_ORIGINS and API_AUTH_TOKEN binding still need to be aligned, then the Worker must be deployed from the audited source.
+- Render Free uses ephemeral local files. Character records, render manifests, and imported VRM binaries persist in Neon. Custom VRM assets are capped at 25MB each and 300MB total; the application returns a clear quota error instead of allowing unbounded storage.
+- The current video endpoint produces a JSON render manifest only; actual MP4 rendering remains unimplemented. Narrativ Forge-compatible persona-pack export/import is supported, including expression-map round trips, but no external Narrativ Forge API integration is configured.
+- The 9 moderate npm audit findings are caused by the minimatch advisory in the ESLint 10 / TypeScript-ESLint toolchain. Do not force an incompatible minimatch major override; the compatible dependency path needs a targeted upstream-compatible update.
+
+- Validation on the free-tier follow-up: GitHub Actions CI run #40 passed backend, frontend, and Worker jobs; Worker Lint run #33 passed. Backend Ruff and Mypy passed, all 54 pytest tests passed, frontend lint/12 Vitest tests/build passed, and the Worker 9-test suite plus Wrangler dry-run passed.

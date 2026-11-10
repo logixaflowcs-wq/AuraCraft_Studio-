@@ -21,7 +21,8 @@ jobs:
       - name: Ruff
         run: ruff check apps/web-platform/backend
       - name: Mypy
-        run: mypy apps/web-platform/backend/app/main.py
+        # Resolve the backend package root so app.persistence is checked as part of the package.
+        run: MYPYPATH=apps/web-platform/backend mypy apps/web-platform/backend/app/main.py
       - name: Pytest
         run: pytest -q apps/web-platform/backend/tests
       - name: Python dependency audit (fail closed)

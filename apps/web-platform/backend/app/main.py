@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +30,17 @@ try:
     load_dotenv()
 except ImportError:
     pass
+from app.persistence import (
+    check_database,
+    database_enabled,
+    delete_state,
+    list_state,
+    read_state,
+    read_asset,
+    write_state,
+    write_asset,
+)
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -58,6 +70,9 @@ async def validate_production_configuration():
     environment = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "").lower()
     if environment in {"production", "prod"} and not _allowed_origins:
         raise RuntimeError("ALLOWED_ORIGINS must be configured in production")
+    # FIX(free-tier-3): fail fast instead of silently falling back to ephemeral files on Render Free.
+    if os.getenv("REQUIRE_DATABASE_URL", "").strip().lower() in {"1", "true", "yes"} and not database_enabled():
+        raise RuntimeError("DATABASE_URL must be configured for durable production storage")
 
 
 # FIX(audit-1-B): protect write APIs with a constant-time checked bearer token.
@@ -302,7 +317,22 @@ def _atomic_write_characters(data: list[dict[str, Any]]) -> None:
 
 
 def load_characters() -> list[dict[str, Any]]:
-    # FIX(audit-2-A): serialize reads, corruption recovery, and default initialization across workers.
+    # FIX(free-tier-1): use Neon Postgres when configured so Render Free restarts do not erase characters.
+    if database_enabled():
+        found, raw_data = read_state("characters")
+        if not found:
+            write_state("characters", DEFAULT_CHARACTERS)
+            return DEFAULT_CHARACTERS
+        try:
+            return [item.model_dump(mode="json") for item in _character_records.validate_python(raw_data)]
+        except (ValidationError, TypeError):
+            backup_key = f"characters:corrupt:{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}"
+            write_state(backup_key, raw_data)
+            logger.exception("Postgres character store was invalid; preserved backup at %s", backup_key)
+            write_state("characters", DEFAULT_CHARACTERS)
+            return DEFAULT_CHARACTERS
+
+    # FIX(audit-2-A): local development fallback serializes reads and recovers corrupted files.
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with FileLock(str(CHARACTERS_FILE) + ".lock"):
         if not CHARACTERS_FILE.exists():
@@ -314,7 +344,6 @@ def load_characters() -> list[dict[str, Any]]:
             return [item.model_dump(mode="json") for item in _character_records.validate_python(raw_data)]
         except (OSError, json.JSONDecodeError, ValidationError, TypeError):
             backup = DATA_DIR / f"characters.corrupt.{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}.json"
-            # Preserve the damaged source before restoring defaults; never silently discard it.
             shutil.copy2(CHARACTERS_FILE, backup)
             logger.exception("Character store was corrupt; backup created at %s", backup)
             _atomic_write_characters(DEFAULT_CHARACTERS)
@@ -322,10 +351,14 @@ def load_characters() -> list[dict[str, Any]]:
 
 
 def save_characters(data: list[dict[str, Any]]) -> None:
-    # FIX(audit-2-A): validate and atomically replace the JSON store under an inter-process lock.
+    # FIX(free-tier-1): persist validated character state in Postgres on ephemeral hosting.
+    validated = [item.model_dump(mode="json") for item in _character_records.validate_python(data)]
+    if database_enabled():
+        write_state("characters", validated)
+        return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with FileLock(str(CHARACTERS_FILE) + ".lock"):
-        _atomic_write_characters(data)
+        _atomic_write_characters(validated)
 
 
 # Pydantic Schemas
@@ -385,6 +418,17 @@ class ManualPersonaPack(BaseModel):
     vrm_model_path: str = Field(default="/models/sample_avatar_a.vrm", max_length=500)
     avatar_color: str = Field(default="#8b5cf6", max_length=20)
     default_emotion: str = Field(default="neutral", max_length=40)
+    # FIX(free-tier-4): preserve Narrativ Forge blendshape mappings on import/export round trips.
+    expression_map: dict[str, str] = Field(
+        default_factory=lambda: {
+            "neutral": "blendshape_neutral",
+            "happy": "blendshape_happy",
+            "angry": "blendshape_angry",
+            "sad": "blendshape_sad",
+            "surprised": "blendshape_surprised",
+        },
+        max_length=20,
+    )
     character_meta: PersonaCharacterMeta
 
 
@@ -401,8 +445,7 @@ def health_check():
         "supported_voices": 8,
         "default_language": "my-MM",
         "supported_archetypes": ["anime", "army", "myanmar", "streamer"],
-        "telegram_topic": 215,
-        "telegram_chat_id": "-1003992125718",
+        "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_GROUP_CHAT_ID),
     }
 
 
@@ -431,11 +474,14 @@ async def telegram_bot_test():
 async def readiness_check():
     # FIX(audit-2-C): readiness checks durable storage access and an actual Edge-TTS voice-list call.
     try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        if not os.access(DATA_DIR, os.R_OK | os.W_OK):
-            raise OSError("data directory is not accessible")
-        if CHARACTERS_FILE.exists() and not os.access(CHARACTERS_FILE, os.R_OK | os.W_OK):
-            raise OSError("character store is not accessible")
+        if database_enabled():
+            check_database()
+        else:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            if not os.access(DATA_DIR, os.R_OK | os.W_OK):
+                raise OSError("data directory is not accessible")
+            if CHARACTERS_FILE.exists() and not os.access(CHARACTERS_FILE, os.R_OK | os.W_OK):
+                raise OSError("character store is not accessible")
         await asyncio.wait_for(edge_tts.list_voices(), timeout=5)
     except Exception:
         logger.exception("Readiness check failed")
@@ -444,8 +490,9 @@ async def readiness_check():
 
 
 # Telegram Webhook & Topic 215 Policy
-TELEGRAM_TOPIC_ID = int(os.getenv("TELEGRAM_TOPIC_ID", "215"))
-TELEGRAM_GROUP_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1003992125718")
+# FIX(free-tier-2): keep private Telegram group/topic identifiers out of the public repository.
+TELEGRAM_TOPIC_ID = int(os.getenv("TELEGRAM_TOPIC_ID", "0"))
+TELEGRAM_GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID", os.getenv("TELEGRAM_CHAT_ID", "")).strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
 
@@ -613,8 +660,9 @@ def _import_aura_archive(archive_bytes: bytes, chars: list[dict[str, Any]]) -> d
                 raise HTTPException(status_code=413, detail="Aura package exceeds expanded size limit")
             if sizes["manifest.json"] > 256 * 1024:
                 raise HTTPException(status_code=413, detail="Aura manifest exceeds 256KB")
-            if sizes["model.vrm"] <= 0 or sizes["model.vrm"] > 100 * 1024 * 1024:
-                raise HTTPException(status_code=413, detail="VRM file exceeds 100MB limit")
+            max_vrm_bytes = 25 * 1024 * 1024 if database_enabled() else 100 * 1024 * 1024
+            if sizes["model.vrm"] <= 0 or sizes["model.vrm"] > max_vrm_bytes:
+                raise HTTPException(status_code=413, detail=f"VRM file exceeds {max_vrm_bytes // (1024 * 1024)}MB limit")
             for image_name in ("thumbnail.png", "reference-sheet.png"):
                 if sizes.get(image_name, 0) > 5 * 1024 * 1024:
                     raise HTTPException(status_code=413, detail="Image asset exceeds 5MB limit")
@@ -651,22 +699,31 @@ def _import_aura_archive(archive_bytes: bytes, chars: list[dict[str, Any]]) -> d
                 raise HTTPException(status_code=422, detail="Aura VRM checksum mismatch")
             if any(str(item.get("id")) == actor_id for item in chars):
                 return {"status": "exists", "actor_id": actor_id, "actor_name": actor_name}
-            asset_dir = DATA_DIR / "imported_vrms"
-            asset_dir.mkdir(parents=True, exist_ok=True)
-            target = (asset_dir / f"{actor_id}.vrm").resolve()
-            if os.path.commonpath((str(asset_dir.resolve()), str(target))) != str(asset_dir.resolve()):
-                raise HTTPException(status_code=400, detail="Invalid VRM storage path")
-            temp_path = None
-            try:
-                with tempfile.NamedTemporaryFile("wb", dir=asset_dir, prefix=".vrm-", suffix=".tmp", delete=False) as handle:
-                    temp_path = handle.name
-                    handle.write(vrm_bytes)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temp_path, target)
-            finally:
-                if temp_path and os.path.exists(temp_path):
-                    os.unlink(temp_path)
+            # FIX(free-tier-5): store custom VRM bytes in Neon on ephemeral Render Free.
+            if database_enabled():
+                try:
+                    write_asset(actor_id, vrm_bytes)
+                except ValueError as error:
+                    raise HTTPException(status_code=413, detail=str(error)) from error
+                except RuntimeError as error:
+                    raise HTTPException(status_code=507, detail=str(error)) from error
+            else:
+                asset_dir = DATA_DIR / "imported_vrms"
+                asset_dir.mkdir(parents=True, exist_ok=True)
+                target = (asset_dir / f"{actor_id}.vrm").resolve()
+                if os.path.commonpath((str(asset_dir.resolve()), str(target))) != str(asset_dir.resolve()):
+                    raise HTTPException(status_code=400, detail="Invalid VRM storage path")
+                temp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile("wb", dir=asset_dir, prefix=".vrm-", suffix=".tmp", delete=False) as handle:
+                        temp_path = handle.name
+                        handle.write(vrm_bytes)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temp_path, target)
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        os.unlink(temp_path)
             character = {
                 "id": actor_id,
                 "name": actor_name.strip(),
@@ -973,7 +1030,11 @@ def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest, _: None = D
         "scenes": scenes,
         "next_step": "Review this manifest, synthesize voice locally, then render with your chosen local video tool.",
     }
-    (RENDER_PLAN_DIR / f"{plan_id}.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+    # FIX(free-tier-1): render manifests live in Postgres on ephemeral hosting.
+    if database_enabled():
+        write_state(f"render_plan:{plan_id}", plan)
+    else:
+        (RENDER_PLAN_DIR / f"{plan_id}.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
     return plan
 
 
@@ -985,12 +1046,15 @@ def _render_plan_path(plan_id: str) -> Path:
 
 @app.get("/api/avatar-video/render-plans")
 def list_avatar_video_render_plans():
-    """List local plan metadata only; no render provider is contacted."""
+    """List saved render manifests; no render provider is contacted."""
+    summary_keys = ("plan_id", "created_at", "status", "character", "aspect_ratio", "estimated_duration_seconds")
+    if database_enabled():
+        return {"items": [{key: plan.get(key) for key in summary_keys} for _, plan, _ in list_state("render_plan:", 50)]}
     plans = []
     for path in sorted(RENDER_PLAN_DIR.glob("plan_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:50]:
         try:
             plan = json.loads(path.read_text(encoding="utf-8"))
-            plans.append({key: plan.get(key) for key in ("plan_id", "created_at", "status", "character", "aspect_ratio", "estimated_duration_seconds")})
+            plans.append({key: plan.get(key) for key in summary_keys})
         except (OSError, json.JSONDecodeError):
             continue
     return {"items": plans}
@@ -998,18 +1062,29 @@ def list_avatar_video_render_plans():
 
 @app.get("/api/avatar-video/render-plans/{plan_id}/download")
 def download_avatar_video_render_plan(plan_id: str):
-    path = _render_plan_path(plan_id)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Render plan not found")
-    return Response(content=path.read_text(encoding="utf-8"), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{plan_id}.json"'})
+    if database_enabled():
+        found, plan = read_state(f"render_plan:{plan_id}")
+        if not found:
+            raise HTTPException(status_code=404, detail="Render plan not found")
+        content = json.dumps(plan, ensure_ascii=False, indent=2)
+    else:
+        path = _render_plan_path(plan_id)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Render plan not found")
+        content = path.read_text(encoding="utf-8")
+    return Response(content=content, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{plan_id}.json"'})
 
 
 @app.delete("/api/avatar-video/render-plans/{plan_id}")
 def delete_avatar_video_render_plan(plan_id: str, _: None = Depends(require_auth)):
-    path = _render_plan_path(plan_id)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Render plan not found")
-    path.unlink()
+    if database_enabled():
+        if not delete_state(f"render_plan:{plan_id}"):
+            raise HTTPException(status_code=404, detail="Render plan not found")
+    else:
+        path = _render_plan_path(plan_id)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Render plan not found")
+        path.unlink()
     return {"status": "deleted", "plan_id": plan_id}
 
 
@@ -1058,9 +1133,18 @@ def get_archetypes():
 
 @app.get("/api/characters/vrm/{actor_id}")
 def get_imported_vrm(actor_id: str):
-    # FIX(audit-2-B): serve imported VRM assets only from the validated persistent asset directory.
+    # FIX(free-tier-5): serve imported VRM assets from Neon when the host filesystem is ephemeral.
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
         raise HTTPException(status_code=404, detail="VRM asset not found")
+    if database_enabled():
+        found, content, content_type = read_asset(actor_id)
+        if not found or content is None:
+            raise HTTPException(status_code=404, detail="VRM asset not found")
+        return Response(
+            content=content,
+            media_type=content_type or "model/gltf-binary",
+            headers={"Content-Disposition": f'inline; filename="{actor_id}.vrm"', "Cache-Control": "public, max-age=3600"},
+        )
     asset_dir = (DATA_DIR / "imported_vrms").resolve()
     asset_path = (asset_dir / f"{actor_id}.vrm").resolve()
     if os.path.commonpath((str(asset_dir), str(asset_path))) != str(asset_dir) or not asset_path.is_file():
@@ -1120,6 +1204,7 @@ def _import_persona_pack(pack: ManualPersonaPack, chars: list[dict[str, Any]]) -
         "vrm_model": pack.vrm_model_path,
         "default_emotion": pack.default_emotion.strip(),
         "avatar_color": pack.avatar_color.strip(),
+        "expression_map": pack.expression_map,
         "tags": [tag.strip() for tag in pack.character_meta.tags if tag.strip()],
     }
     chars.append(imported)
@@ -1172,13 +1257,13 @@ def export_character_pack(payload: PersonaPackExportRequest, _: None = Depends(r
         },
         "vrm_model_path": target["vrm_model"],
         "avatar_color": target.get("avatar_color", "#8b5cf6"),
-        "expression_map": {
+        "expression_map": target.get("expression_map", {
             "neutral": "blendshape_neutral",
             "happy": "blendshape_happy",
             "angry": "blendshape_angry",
             "sad": "blendshape_sad",
             "surprised": "blendshape_surprised"
-        },
+        }),
         "character_meta": {
             "personality_prompt": target["personality"],
             "style": target.get("style", "general"),
@@ -1240,13 +1325,13 @@ def download_persona_pack(character_id: str):
         },
         "vrm_model_path": target["vrm_model"],
         "avatar_color": target.get("avatar_color", "#8b5cf6"),
-        "expression_map": {
+        "expression_map": target.get("expression_map", {
             "neutral": "blendshape_neutral",
             "happy": "blendshape_happy",
             "angry": "blendshape_angry",
             "sad": "blendshape_sad",
             "surprised": "blendshape_surprised"
-        },
+        }),
         "character_meta": {
             "personality_prompt": target["personality"],
             "style": target.get("style", "general"),
