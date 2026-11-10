@@ -1,25 +1,35 @@
 from __future__ import annotations
 
-import base64
+import hmac
+import html
 import io
 import json
+import logging
 import os
-import hmac
+import re
+import tempfile
+import threading
+import time
+from collections import defaultdict, deque
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import edge_tts
 import httpx
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
-from fastapi import FastAPI, HTTPException, Query, Response, Request, Header
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="AuraCraft Studio Backend Service",
@@ -27,13 +37,59 @@ app = FastAPI(
     version="1.0.0",
 )
 
+_allowed_origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_credentials=bool(_allowed_origins),
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Telegram-Bot-Api-Secret-Token"],
 )
+
+# FIX(audit-1-D): production must never start with wildcard or missing CORS origins.
+@app.on_event("startup")
+async def validate_production_configuration():
+    environment = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "").lower()
+    if environment in {"production", "prod"} and not _allowed_origins:
+        raise RuntimeError("ALLOWED_ORIGINS must be configured in production")
+
+
+# FIX(audit-1-B): protect write APIs with a constant-time checked bearer token.
+def require_auth(authorization: str | None = Header(default=None)) -> None:
+    expected = os.getenv("API_AUTH_TOKEN", "").strip()
+    if not expected:
+        if _production_mode():
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return
+    scheme, _, supplied = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+# FIX(audit-1-E): bound TTS usage to ten requests/minute per client and credential.
+_tts_rate_lock = threading.Lock()
+_tts_rate_events: dict[str, deque[float]] = defaultdict(deque)
+def enforce_tts_rate_limit(request: Request, authorization: str | None = Header(default=None)) -> None:
+    client_ip = request.client.host if request.client else "unknown"
+    token_fingerprint = hmac.new(os.getenv("API_AUTH_TOKEN", "").encode(), (authorization or "").encode(), "sha256").hexdigest()
+    key = f"{client_ip}:{token_fingerprint}"
+    now = time.monotonic()
+    with _tts_rate_lock:
+        events = _tts_rate_events[key]
+        while events and now - events[0] >= 60:
+            events.popleft()
+        if len(events) >= 10:
+            retry_after = max(1, int(60 - (now - events[0])))
+            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(retry_after)})
+        events.append(now)
+
+
+# FIX(audit-1-F): centralize unexpected failures; keep tracebacks in server logs only.
+@app.exception_handler(Exception)
+async def unexpected_error_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled API exception on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CHARACTERS_FILE = DATA_DIR / "characters.json"
@@ -194,7 +250,7 @@ DEFAULT_CHARACTERS = [
     }
 ]
 
-def load_characters() -> List[Dict[str, Any]]:
+def load_characters() -> list[dict[str, Any]]:
     if not CHARACTERS_FILE.exists():
         with open(CHARACTERS_FILE, "w", encoding="utf-8") as f:
             json.dump(DEFAULT_CHARACTERS, f, indent=2, ensure_ascii=False)
@@ -202,10 +258,10 @@ def load_characters() -> List[Dict[str, Any]]:
     try:
         with open(CHARACTERS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError, TypeError):
         return DEFAULT_CHARACTERS
 
-def save_characters(data: List[Dict[str, Any]]) -> None:
+def save_characters(data: list[dict[str, Any]]) -> None:
     with open(CHARACTERS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -233,8 +289,8 @@ class CharacterCreate(BaseModel):
     personality: str = Field(default="Enthusiastic and polite")
     vrm_model: str = Field(default="/models/sample_avatar_a.vrm")
     default_emotion: str = Field(default="neutral")
-    avatar_color: Optional[str] = Field(default="#8b5cf6")
-    tags: List[str] = Field(default_factory=list)
+    avatar_color: str | None = Field(default="#8b5cf6")
+    tags: list[str] = Field(default_factory=list)
 
 class PersonaPackExportRequest(BaseModel):
     character_id: str
@@ -249,7 +305,7 @@ class PersonaVoiceBinding(BaseModel):
 class PersonaCharacterMeta(BaseModel):
     personality_prompt: str = Field(default="Enthusiastic and polite", max_length=2000)
     style: str = Field(default="custom", max_length=50)
-    tags: List[str] = Field(default_factory=list, max_length=30)
+    tags: list[str] = Field(default_factory=list, max_length=30)
 
 
 class ManualPersonaPack(BaseModel):
@@ -257,7 +313,7 @@ class ManualPersonaPack(BaseModel):
 
     export_version: str = Field(default="1.0.0", max_length=20)
     source_studio: str = Field(default="AuraCraft Studio", max_length=100)
-    actor_id: str = Field(min_length=1, max_length=120)
+    actor_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     actor_name: str = Field(min_length=1, max_length=100)
     role: str = Field(default="Virtual Actor", max_length=100)
     style: str = Field(default="custom", max_length=50)
@@ -269,7 +325,7 @@ class ManualPersonaPack(BaseModel):
 
 
 class ManualPersonaPackBatch(BaseModel):
-    packs: List[ManualPersonaPack] = Field(min_length=1, max_length=50)
+    packs: list[ManualPersonaPack] = Field(min_length=1, max_length=50)
 
 
 @app.get("/health")
@@ -293,7 +349,7 @@ TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
 
 
 def _production_mode() -> bool:
-    environment = os.getenv("ENVIRONMENT", "").strip() or os.getenv("APP_ENV", "development").strip()
+    environment = os.getenv("ENV", "").strip() or os.getenv("ENVIRONMENT", "").strip() or os.getenv("APP_ENV", "development").strip()
     return environment.lower() in {"production", "prod"}
 
 
@@ -316,8 +372,8 @@ async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
             return resp.status_code == 200
-    except Exception as exc:
-        print(f"[Telegram Webhook Error] Delivery failed: {exc}")
+    except httpx.HTTPError:
+        logger.exception("Telegram webhook delivery failed")
         return False
 
 
@@ -338,7 +394,7 @@ async def register_telegram_commands_on_startup():
         {"command": "render", "description": "Generate multi-scene video plan: /render <script>"},
         {"command": "export", "description": "Export persona pack: /export <char_id>"},
     ]
-    payload: Dict[str, Any] = {"commands": commands}
+    payload: dict[str, Any] = {"commands": commands}
     if chat_id:
         try:
             payload["scope"] = {"type": "chat", "chat_id": int(chat_id)}
@@ -349,8 +405,8 @@ async def register_telegram_commands_on_startup():
             resp = await client.post(f"https://api.telegram.org/bot{token}/setMyCommands", json=payload)
             if resp.status_code == 200:
                 print("[Telegram Startup] Successfully registered AuraCraft bot commands via setMyCommands")
-    except Exception as exc:
-        print(f"[Telegram Startup] Note: Command registration skipped ({exc})")
+    except httpx.HTTPError:
+        logger.exception("Telegram command registration failed")
 
 
 def _allowed_telegram_user_ids() -> set[str]:
@@ -360,7 +416,7 @@ def _allowed_telegram_user_ids() -> set[str]:
 @app.post("/api/telegram/webhook")
 async def telegram_webhook(
     request: Request,
-    x_telegram_bot_api_secret_token: Optional[str] = Header(None)
+    x_telegram_bot_api_secret_token: str | None = Header(None)
 ):
     """AuraCraft Telegram Webhook (Strictly Topic 215 Scoped)."""
     # 1. Require Telegram's webhook secret; missing secrets must never be accepted.
@@ -394,7 +450,7 @@ async def telegram_webhook(
 
     reply_text = ""
     action_type = ""
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
 
     if command in {"/start", "/help", "/commands"}:
         action_type = "help"
@@ -415,7 +471,7 @@ async def telegram_webhook(
     elif command == "/characters":
         action_type = "characters"
         chars = load_characters()
-        c_lines = [f"• <b>{c['name']}</b> ({c.get('style', 'custom')} | <code>{c['voice_id']}</code>)" for c in chars[:8]]
+        c_lines = [f"• <b>{html.escape(str(c['name']))}</b> ({html.escape(str(c.get('style', 'custom')))} | <code>{html.escape(str(c['voice_id']))}</code>)" for c in chars[:8]]
         reply_text = "🎭 <b>AuraCraft Archetypes (Topic 215):</b>\n" + "\n".join(c_lines)
     elif command == "/speak":
         action_type = "speak"
@@ -423,7 +479,7 @@ async def telegram_webhook(
         if not speak_text:
             reply_text = "⚠️ Usage: /speak <text to say>"
         else:
-            reply_text = f"🎙️ <b>Speech Queued:</b> {speak_text[:120]}\nVoice: <code>my-MM-NilarNeural</code>\nStatus: Synthesized zero-cost Edge-TTS"
+            reply_text = f"🎙️ <b>Speech Queued:</b> {html.escape(speak_text[:120])}\nVoice: <code>my-MM-NilarNeural</code>\nStatus: Synthesized zero-cost Edge-TTS"
     elif command == "/voice":
         action_type = "voice"
         _, _, voice_request = text.partition(" ")
@@ -437,7 +493,7 @@ async def telegram_webhook(
             else:
                 extra["character_id"] = character_id
                 extra["voice_id"] = character["voice_id"]
-                reply_text = f"🎙️ <b>{character['name']}</b>\nVoice: <code>{character['voice_id']}</code>\nText: {speak_text.strip()[:100]}"
+                reply_text = f"🎙️ <b>{html.escape(str(character['name']))}</b>\nVoice: <code>{html.escape(str(character['voice_id']))}</code>\nText: {html.escape(speak_text.strip()[:100])}"
     elif command == "/render":
         action_type = "render"
         render_script = text.partition(" ")[2].strip()
@@ -461,7 +517,7 @@ async def telegram_webhook(
         if not char_id:
             reply_text = "⚠️ Usage: /export <character_id>"
         else:
-            reply_text = f"📦 Standalone JSON persona pack ready for <code>{char_id}</code>.\nDownload it from AuraCraft Studio: <code>/api/characters/{char_id}/download-pack</code>"
+            reply_text = f"📦 Standalone JSON persona pack ready for <code>{html.escape(char_id)}</code>.\nDownload it from AuraCraft Studio: <code>/api/characters/{char_id}/download-pack</code>"
 
     if reply_text:
         target_chat = message.get("chat", {}).get("id") or TELEGRAM_GROUP_CHAT_ID
@@ -486,7 +542,7 @@ def get_voices():
 
 
 @app.post("/api/tts/synthesize")
-async def synthesize_speech(payload: SynthesizeRequest):
+async def synthesize_speech(payload: SynthesizeRequest, request: Request, _: None = Depends(require_auth), __: None = Depends(enforce_tts_rate_limit)):
     """Zero-cost Neural Speech generation via Microsoft Edge-TTS."""
     try:
         communicate = edge_tts.Communicate(
@@ -513,12 +569,15 @@ async def synthesize_speech(payload: SynthesizeRequest):
                 "X-Voice-Used": payload.voice,
             }
         )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"TTS synthesis error: {str(exc)}")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("TTS synthesis failed")
+        raise HTTPException(status_code=500, detail="TTS synthesis failed")
 
 
 @app.post("/api/avatar-video/render-plan")
-def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest):
+def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest, _: None = Depends(require_auth)):
     """Create a local, reviewable avatar-video manifest without rendering or cloud calls."""
     character = next((item for item in load_characters() if item.get("id") == payload.character_id), None)
     if not character:
@@ -540,7 +599,7 @@ def create_avatar_video_render_plan(payload: AvatarVideoPlanRequest):
     plan_id = f"plan_{uuid4().hex}"
     plan = {
         "plan_id": plan_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "status": "planned",
         "render_mode": "local-manifest-only",
         "character": {"id": character["id"], "name": character["name"], "voice_id": character["voice_id"]},
@@ -581,7 +640,7 @@ def download_avatar_video_render_plan(plan_id: str):
 
 
 @app.delete("/api/avatar-video/render-plans/{plan_id}")
-def delete_avatar_video_render_plan(plan_id: str):
+def delete_avatar_video_render_plan(plan_id: str, _: None = Depends(require_auth)):
     path = _render_plan_path(plan_id)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Render plan not found")
@@ -633,7 +692,7 @@ def get_archetypes():
 
 
 @app.get("/api/characters")
-def list_characters(style: Optional[str] = Query(None, description="Filter by style archetype")):
+def list_characters(style: str | None = Query(None, description="Filter by style archetype")):
     chars = load_characters()
     if style:
         return [c for c in chars if c.get("style") == style]
@@ -641,7 +700,7 @@ def list_characters(style: Optional[str] = Query(None, description="Filter by st
 
 
 @app.post("/api/characters")
-def create_character(payload: CharacterCreate):
+def create_character(payload: CharacterCreate, _: None = Depends(require_auth)):
     chars = load_characters()
     char_id = f"char_{payload.style}_{payload.name.lower().replace(' ', '_')}_{len(chars)+1}"
     new_char = {
@@ -662,9 +721,12 @@ def create_character(payload: CharacterCreate):
     return new_char
 
 
-def _import_persona_pack(pack: ManualPersonaPack, chars: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _import_persona_pack(pack: ManualPersonaPack, chars: list[dict[str, Any]]) -> dict[str, Any]:
     """Import an explicit local pack without overwriting an existing actor."""
+    # FIX(audit-1-C): reject traversal, separators, absolute paths, and null bytes at the trust boundary.
     actor_id = pack.actor_id.strip()
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
+        raise HTTPException(status_code=422, detail="Invalid actor_id")
     if ".." in pack.vrm_model_path or not pack.vrm_model_path.startswith("/models/"):
         raise HTTPException(status_code=422, detail="VRM model path must stay inside /models/")
     if any(character.get("id") == actor_id for character in chars):
@@ -688,7 +750,7 @@ def _import_persona_pack(pack: ManualPersonaPack, chars: List[Dict[str, Any]]) -
 
 
 @app.post("/api/characters/import-pack")
-def import_persona_pack(pack: ManualPersonaPack):
+def import_persona_pack(pack: ManualPersonaPack, _: None = Depends(require_auth)):
     """Import one user-selected JSON persona pack into AuraCraft only."""
     chars = load_characters()
     result = _import_persona_pack(pack, chars)
@@ -698,7 +760,7 @@ def import_persona_pack(pack: ManualPersonaPack):
 
 
 @app.post("/api/characters/import-packs")
-def import_persona_packs(batch: ManualPersonaPackBatch):
+def import_persona_packs(batch: ManualPersonaPackBatch, _: None = Depends(require_auth)):
     """Import selected JSON packs atomically; conflicts are reported, never replaced."""
     chars = load_characters()
     results = [_import_persona_pack(pack, chars) for pack in batch.packs]
@@ -712,7 +774,7 @@ def import_persona_packs(batch: ManualPersonaPackBatch):
 
 
 @app.post("/api/characters/export-pack")
-def export_character_pack(payload: PersonaPackExportRequest):
+def export_character_pack(payload: PersonaPackExportRequest, _: None = Depends(require_auth)):
     """Package a character from AuraCraft Studio into a standalone downloadable JSON asset pack."""
     chars = load_characters()
     target = next((c for c in chars if c["id"] == payload.character_id), None)
@@ -750,9 +812,25 @@ def export_character_pack(payload: PersonaPackExportRequest):
     # Save standalone downloadable file in AuraCraft's own export folder
     export_dir = DATA_DIR / "exported_packs"
     export_dir.mkdir(parents=True, exist_ok=True)
-    export_file = export_dir / f"{target['id']}_auracraft_pack.json"
-    with open(export_file, "w", encoding="utf-8") as f:
-        json.dump(auracraft_asset_pack, f, indent=2, ensure_ascii=False)
+    actor_id = str(target["id"])
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", actor_id):
+        raise HTTPException(status_code=422, detail="Invalid actor_id")
+    name = f"{actor_id}_auracraft_pack.json"
+    resolved = (export_dir / name).resolve()
+    if os.path.commonpath((str(export_dir.resolve()), str(resolved))) != str(export_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid export path")
+    export_file = resolved
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=export_dir, prefix=".export-", suffix=".tmp", delete=False) as f:
+            temp_name = f.name
+            json.dump(auracraft_asset_pack, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_name, export_file)
+    finally:
+        if temp_name and os.path.exists(temp_name):
+            os.unlink(temp_name)
         
     return {
         "status": "success",
