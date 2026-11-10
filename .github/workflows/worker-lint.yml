@@ -1,0 +1,30 @@
+name: Cloudflare Worker Lint
+
+on:
+  push:
+    paths:
+      - 'apps/web-platform/backend/cloudflare_worker/**'
+      - '.github/workflows/worker-lint.yml'
+  pull_request:
+    paths:
+      - 'apps/web-platform/backend/cloudflare_worker/**'
+      - '.github/workflows/worker-lint.yml'
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web-platform/backend/cloudflare_worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web-platform/backend/cloudflare_worker/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npx wrangler deploy --dry-run --outdir /tmp/auracraft-worker-dist
+      - run: npm audit --audit-level=high

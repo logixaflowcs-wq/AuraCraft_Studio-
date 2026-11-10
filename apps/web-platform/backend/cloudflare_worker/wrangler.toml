@@ -1,6 +1,6 @@
 name = "auracraft-studio-telegram-worker"
 main = "index.js"
-compatibility_date = "2024-09-23"
+compatibility_date = "2026-11-10"
 
 # Zero-Cost Free Tier Worker Configuration
 # Free allowance: 100,000 requests per day across Cloudflare Edge
@@ -8,9 +8,16 @@ workers_dev = true
 
 [vars]
 ENVIRONMENT = "production"
-# Set these deployment-specific values before publishing the Worker.
-# BACKEND_API_URL = "https://your-backend.example.com"
-# ALLOWED_ORIGINS = "https://your-frontend.example.com"
+BACKEND_API_URL = "https://auracraft-backend.onrender.com"
+ALLOWED_ORIGINS = "https://auracraft-frontend.onrender.com"
+
+[observability]
+enabled = true
+
+# Optional future object storage binding; enable only after creating the bucket.
+# [[r2_buckets]]
+# binding = "AURACRAFT_ASSETS"
+# bucket_name = "auracraft-assets"
 
 # Secrets to configure with `wrangler secret put <NAME>`:
 # - API_AUTH_TOKEN (same value as the backend; never expose it to Vite)
