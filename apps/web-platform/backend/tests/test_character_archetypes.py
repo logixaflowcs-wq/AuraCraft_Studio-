@@ -6,6 +6,28 @@ from fastapi.testclient import TestClient
 client = TestClient(app)
 
 
+def test_legacy_vrm_paths_normalize_to_packaged_assets():
+    from app.main import DEFAULT_CHARACTERS, _normalize_character_vrm_paths
+
+    available_assets = {
+        "/models/avatar_female_a.vrm",
+        "/models/avatar_female_c.vrm",
+        "/avatar_human.vrm",
+    }
+    normalized = _normalize_character_vrm_paths([
+        {"id": "legacy-a", "vrm_model": "/models/sample_avatar_a.vrm"},
+        {"id": "legacy-b", "vrm_model": "/models/sample_avatar_b.vrm"},
+        {"id": "legacy-c", "vrm_model": "/models/sample_avatar_c.vrm"},
+    ])
+
+    assert [item["vrm_model"] for item in normalized] == [
+        "/models/avatar_female_a.vrm",
+        "/avatar_human.vrm",
+        "/models/avatar_female_c.vrm",
+    ]
+    assert all(character["vrm_model"] in available_assets for character in DEFAULT_CHARACTERS)
+
+
 def test_health_check_archetypes():
     response = client.get("/health")
     assert response.status_code == 200
