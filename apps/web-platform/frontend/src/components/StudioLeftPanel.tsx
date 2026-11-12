@@ -336,7 +336,7 @@ export const StudioLeftPanel: React.FC<StudioLeftPanelProps> = ({
         <div className="flex items-center justify-between px-1 pb-1 border-b border-[#1f293d]/40 mb-1">
           <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
             <Layers className="w-3 h-3 text-purple-400" />
-            <span>{isMyanmar ? `ဇာတ်ကောင်စာရင်း (${filteredCharacters.length})` : `Characters (${filteredCharacters.length})`}</span>
+            <span>{isMyanmar ? `စတေ့ချ် Avatar (${filteredCharacters.length})` : `Stage Avatars (${filteredCharacters.length})`}</span>
           </span>
 
           {onResetAllPresets && deletedCharacterIds && deletedCharacterIds.length > 0 && (

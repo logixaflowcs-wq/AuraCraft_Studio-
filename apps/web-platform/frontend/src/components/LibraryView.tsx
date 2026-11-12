@@ -255,7 +255,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onPreviewCharacter }) 
                 <p className="text-slate-600 text-sm mt-1">
                   {searchQuery
                     ? 'Try a different search term'
-                    : 'Import a .vrm or .aura file to get started'}
+                    : 'This is normal for a new workspace. Import a .vrm or .aura file to add items; built-in Stage Avatars and Casting Presets are listed separately.'}
                 </p>
               </div>
               {!searchQuery && (
