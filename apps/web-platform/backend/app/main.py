@@ -450,7 +450,7 @@ def health_check():
 
 
 @app.get("/api/telegram/test")
-async def telegram_bot_test():
+async def telegram_bot_test(_: None = Depends(require_auth)):
     if not _telegram_api_configured():
         raise HTTPException(status_code=503, detail="Telegram API proxy is not configured")
     try:
@@ -788,7 +788,7 @@ async def register_telegram_commands_on_startup():
     """Register Topic #215 commands into Telegram's Bot menu using setMyCommands."""
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip() or TELEGRAM_GROUP_CHAT_ID
     if not _telegram_api_configured():
-        logger.warning("Telegram registration skipped: configure TELEGRAM_API_PROXY_URL or TELEGRAM_BOT_TOKEN")
+        print("[Telegram Startup] Registration skipped: Telegram API proxy or bot token is missing")
         return
     commands = [
         {"command": "start", "description": "Connect to AuraCraft Studio (Topic 215)"},
@@ -811,9 +811,9 @@ async def register_telegram_commands_on_startup():
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(_telegram_api_url("setMyCommands"), json=payload, headers=_telegram_api_headers())
             if resp.status_code == 200 and resp.json().get("ok"):
-                logger.info("Telegram bot commands registered")
+                print("[Telegram Startup] Bot commands registered successfully through Cloudflare proxy")
             else:
-                logger.warning("Telegram setMyCommands failed with HTTP %s", resp.status_code)
+                print(f"[Telegram Startup] Bot command registration failed with HTTP {resp.status_code}")
 
             webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "").strip()
             if webhook_url:
@@ -829,11 +829,11 @@ async def register_telegram_commands_on_startup():
                 )
                 webhook_payload = webhook_response.json()
                 if not webhook_response.is_success or not webhook_payload.get("ok"):
-                    logger.error("Telegram webhook registration failed with HTTP %s", webhook_response.status_code)
+                    print(f"[Telegram Startup] Webhook registration failed with HTTP {webhook_response.status_code}")
                 else:
-                    logger.info("Telegram webhook registered successfully")
+                    print("[Telegram Startup] Telegram webhook registered successfully through Cloudflare proxy")
             else:
-                logger.warning("Telegram webhook registration skipped: TELEGRAM_WEBHOOK_URL is not configured")
+                print("[Telegram Startup] Webhook registration skipped: TELEGRAM_WEBHOOK_URL is missing")
     except (httpx.HTTPError, ValueError):
         logger.exception("Telegram startup registration failed")
 
