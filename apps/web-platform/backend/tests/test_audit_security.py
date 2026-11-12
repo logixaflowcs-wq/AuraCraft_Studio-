@@ -224,8 +224,13 @@ def test_telegram_get_me_proxy_returns_only_public_bot_identity(monkeypatch):
     monkeypatch.setattr(main, "TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setattr(main.httpx, "AsyncClient", FakeClient)
     result = asyncio.run(main.telegram_bot_test())
-    assert result == {"ok": True, "username": "auracraft_test_bot", "first_name": "AuraCraft"}
+    assert result["ok"] is True
+    assert result["username"] == "auracraft_test_bot"
+    assert result["first_name"] == "AuraCraft"
+    assert result["webhook_configured"] is False
+    assert result["pending_update_count"] == 0
     assert "token" not in result
+    assert "webhook_url" not in result
 
 
 def test_production_cors_requires_explicit_origins(monkeypatch):
