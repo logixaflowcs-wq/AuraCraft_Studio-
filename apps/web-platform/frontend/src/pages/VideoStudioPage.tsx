@@ -42,6 +42,7 @@ export const VideoStudioPage: React.FC = () => {
   const [isRenderingVideo, setIsRenderingVideo] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
   const [renderedVideoUrl, setRenderedVideoUrl] = useState<string | null>(null);
+  const [renderedVideoMimeType, setRenderedVideoMimeType] = useState<string | null>(null);
   const [videoRenderError, setVideoRenderError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -166,6 +167,7 @@ export const VideoStudioPage: React.FC = () => {
     setVideoRenderError(null);
     if (renderedVideoUrl) URL.revokeObjectURL(renderedVideoUrl);
     setRenderedVideoUrl(null);
+    setRenderedVideoMimeType(null);
 
     const canvas = document.createElement('canvas');
     const width = aspectRatio === '9:16' ? 720 : 1280;
@@ -232,7 +234,7 @@ export const VideoStudioPage: React.FC = () => {
       ctx.fillRect(width * 0.08, height * 0.88, width * 0.84 * progress, 6);
       ctx.fillStyle = '#94a3b8';
       ctx.font = '16px system-ui, sans-serif';
-      ctx.fillText('AuraCraft Studio • Edge-TTS narration • WebM', width * 0.08, height * 0.92);
+      ctx.fillText('AuraCraft Studio • Edge-TTS narration • MP4 / WebM', width * 0.08, height * 0.92);
     };
 
     try {
@@ -255,16 +257,33 @@ export const VideoStudioPage: React.FC = () => {
         ...canvasStream.getVideoTracks(),
         ...audioDestination.stream.getAudioTracks(),
       ]);
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : 'video/webm';
-      recorder = new MediaRecorder(combinedStream, { mimeType });
+      const mimeCandidates = [
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4;codecs=avc1.42E01E',
+        'video/mp4',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+      ];
+      const supportedMimeTypes = mimeCandidates.filter((candidate) => MediaRecorder.isTypeSupported(candidate));
+      let recorderInstance: MediaRecorder | null = null;
+      for (const candidate of supportedMimeTypes) {
+        try {
+          recorderInstance = new MediaRecorder(combinedStream, { mimeType: candidate });
+          break;
+        } catch {
+          // Try the next browser-supported container/codec combination.
+        }
+      }
+      if (!recorderInstance) recorderInstance = new MediaRecorder(combinedStream);
+      recorder = recorderInstance;
+      const outputMimeType = recorder.mimeType || supportedMimeTypes[0] || 'video/webm';
       const chunks: BlobPart[] = [];
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
       const finished = new Promise<Blob>((resolve, reject) => {
         if (!recorder) return reject(new Error('Video recorder could not start.'));
         recorder.onerror = () => reject(new Error('Video encoding failed.'));
-        recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+        recorder.onstop = () => resolve(new Blob(chunks, { type: outputMimeType }));
       });
 
       let audioStart = audioContext.currentTime + 0.25;
@@ -295,6 +314,7 @@ export const VideoStudioPage: React.FC = () => {
       const blob = await finished;
       if (!blob.size) throw new Error('The browser produced an empty video file.');
       setRenderProgress(100);
+      setRenderedVideoMimeType(blob.type || outputMimeType);
       setRenderedVideoUrl(URL.createObjectURL(blob));
     } catch (error) {
       if (recorder && recorder.state !== 'inactive') recorder.stop();
@@ -311,7 +331,8 @@ export const VideoStudioPage: React.FC = () => {
     if (!renderedVideoUrl) return;
     const link = document.createElement('a');
     link.href = renderedVideoUrl;
-    link.download = `auracraft_storyboard_${aspectRatio.replace(':', 'x')}.webm`;
+    const extension = renderedVideoMimeType?.includes('mp4') ? 'mp4' : 'webm';
+    link.download = `auracraft_storyboard_${aspectRatio.replace(':', 'x')}.${extension}`;
     link.click();
   };
 
@@ -524,21 +545,21 @@ export const VideoStudioPage: React.FC = () => {
           <div className="bg-[#111726]/80 border border-[#1f293d] rounded-2xl p-5 space-y-3">
             <div>
               <h3 className="text-sm font-bold text-white">Render narrated storyboard video</h3>
-              <p className="text-xs text-slate-400 mt-1">Browser-side narrated WebM export using the selected Edge-TTS voice. It renders animated scene cards and captions; 3D avatar animation is not included.</p>
+              <p className="text-xs text-slate-400 mt-1">Browser-side narrated export: MP4 when your browser supports it, otherwise WebM. It renders animated scene cards and captions; 3D avatar animation is not included.</p>
             </div>
             <button
               onClick={handleRenderVideo}
               disabled={isRenderingVideo || !scenes.length}
               className="w-full py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-2"
             >
-              {isRenderingVideo ? <><Loader2 className="w-4 h-4 animate-spin" /> Rendering {renderProgress}%</> : <><Play className="w-4 h-4" /> Render WebM Video</>}
+              {isRenderingVideo ? <><Loader2 className="w-4 h-4 animate-spin" /> Rendering {renderProgress}%</> : <><Play className="w-4 h-4" /> Render Video (MP4 / WebM)</>}
             </button>
             {videoRenderError && <p role="alert" className="text-xs text-rose-300">{videoRenderError}</p>}
             {renderedVideoUrl && (
               <div className="space-y-2">
                 <video controls playsInline src={renderedVideoUrl} className="w-full rounded-xl border border-[#23314f]" />
                 <button onClick={handleDownloadVideo} className="w-full py-2 rounded-xl bg-emerald-700/70 hover:bg-emerald-600 text-white text-xs font-semibold flex items-center justify-center gap-2">
-                  <Download className="w-4 h-4" /> Download rendered WebM
+                  <Download className="w-4 h-4" /> Download rendered {renderedVideoMimeType?.includes('mp4') ? 'MP4' : 'WebM'}
                 </button>
               </div>
             )}
