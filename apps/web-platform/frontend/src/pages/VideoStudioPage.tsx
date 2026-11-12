@@ -193,17 +193,17 @@ export const VideoStudioPage: React.FC = () => {
       ctx.textBaseline = 'top';
       ctx.fillText(scene.title.slice(0, 48), width * 0.08, height * 0.31, width * 0.84);
 
-      const words = scene.script.split(/\s+/);
       const fontSize = aspectRatio === '9:16' ? 30 : 34;
       ctx.font = `400 ${fontSize}px system-ui, "Noto Sans Myanmar", sans-serif`;
       const maxWidth = width * 0.84;
       const lines: string[] = [];
       let line = '';
-      for (const word of words) {
-        const candidate = line ? line + ' ' + word : word;
+      // Myanmar text often has no spaces between words, so wrap by Unicode code point.
+      for (const character of Array.from(scene.script)) {
+        const candidate = line + character;
         if (line && ctx.measureText(candidate).width > maxWidth) {
           lines.push(line);
-          line = word;
+          line = character.trim() ? character : '';
         } else line = candidate;
       }
       if (line) lines.push(line);
