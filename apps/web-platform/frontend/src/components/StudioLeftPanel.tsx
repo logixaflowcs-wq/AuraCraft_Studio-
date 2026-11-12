@@ -257,7 +257,7 @@ export const StudioLeftPanel: React.FC<StudioLeftPanelProps> = ({
   });
 
   return (
-    <aside className="w-72 border-r border-[#1f293d] bg-[#0c101c]/95 flex flex-col h-full shadow-2xl z-30 flex-shrink-0 select-none">
+    <aside className="w-full xl:w-72 h-48 xl:h-full border-b xl:border-b-0 xl:border-r border-[#1f293d] bg-[#0c101c]/95 flex flex-col shadow-2xl z-30 flex-shrink-0 select-none">
       {/* Hidden File Inputs */}
       <input
         ref={photoInputRef}
