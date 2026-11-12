@@ -299,7 +299,7 @@ export const CharactersPage: React.FC<CharactersPageProps> = ({
               <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
                 Character Casting & Archetypes Roster
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-800/40">
-                  {characters.length} Active Personas
+                  {characters.length} Casting Presets
                 </span>
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
