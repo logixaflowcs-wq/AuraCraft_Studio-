@@ -8,6 +8,7 @@ export const VideoStudioPage: React.FC = () => {
   const [characterName, setCharacterName] = useState('Shinji Kazama (シンジ)');
   const [selectedCharacterId, setSelectedCharacterId] = useState('char_anime_shinji');
   const [availableCharacters, setAvailableCharacters] = useState<Array<{ id: string; name: string; voice_id?: string }>>([]);
+  const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [voiceId, setVoiceId] = useState('my-MM-NilarNeural');
   const [durationPerScene, setDurationPerScene] = useState(6);
@@ -53,8 +54,14 @@ export const VideoStudioPage: React.FC = () => {
         const selected = records.find((item) => item.id === selectedCharacterId) || records[0];
         setSelectedCharacterId(selected.id);
         setCharacterName(selected.name);
+        if (selected.voice_id) setVoiceId(selected.voice_id);
       }
     }).catch(() => setGenerationError('Character list could not be loaded; check backend availability.'));
+    fetch(API_ENDPOINTS.voices).then(async (response) => {
+      if (!response.ok) throw new Error('Voice list unavailable');
+      const voices = await response.json();
+      if (Array.isArray(voices)) setAvailableVoices(voices);
+    }).catch(() => setVideoRenderError('Voice list could not be loaded; check backend availability.'));
   }, []);
 
   const addScene = () => {
@@ -452,7 +459,10 @@ export const VideoStudioPage: React.FC = () => {
                   onChange={(e) => {
                     const selected = availableCharacters.find((item) => item.id === e.target.value);
                     setSelectedCharacterId(e.target.value);
-                    if (selected) setCharacterName(selected.name);
+                    if (selected) {
+                      setCharacterName(selected.name);
+                      if (selected.voice_id) setVoiceId(selected.voice_id);
+                    }
                   }}
                   className="w-full bg-[#0a0d14] border border-[#23314f] rounded-xl px-3 py-2 text-slate-100 text-xs"
                 >
@@ -460,6 +470,18 @@ export const VideoStudioPage: React.FC = () => {
                     <option key={character.id} value={character.id}>{character.name}</option>
                   ))}
                   {!availableCharacters.length && <option value={selectedCharacterId}>{characterName}</option>}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Narration Voice (Edge-TTS)</label>
+                <select
+                  value={voiceId}
+                  onChange={(e) => setVoiceId(e.target.value)}
+                  className="w-full bg-[#0a0d14] border border-[#23314f] rounded-xl px-3 py-2 text-slate-100 text-xs"
+                >
+                  {availableVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
+                  {!availableVoices.length && <option value={voiceId}>{voiceId}</option>}
                 </select>
               </div>
 
