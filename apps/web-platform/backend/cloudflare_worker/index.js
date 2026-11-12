@@ -15,8 +15,22 @@ export function constantTimeEqual(left, right) {
   return diff === 0;
 }
 
+function normalizeOrigin(value) {
+  if (typeof value !== "string" || !value || value === "null") return "";
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
+  }
+}
+
 function allowedOrigins(env) {
-  return new Set((env.ALLOWED_ORIGINS || "").split(",").map((value) => value.trim()).filter(Boolean));
+  return new Set(
+    (env.ALLOWED_ORIGINS || "")
+      .split(",")
+      .map((value) => normalizeOrigin(value.trim()))
+      .filter(Boolean),
+  );
 }
 
 function corsHeaders(origin) {
@@ -151,12 +165,13 @@ export default {
 
     // FIX(audit-1-D): browser API requests must originate from an explicit CORS allowlist.
     const origin = request.headers.get("Origin") || "";
+    const normalizedOrigin = normalizeOrigin(origin);
     const origins = allowedOrigins(env);
     if (request.method === "OPTIONS") {
-      if (!origin || !origins.has(origin)) return new Response(null, { status: 403 });
+      if (!normalizedOrigin || !origins.has(normalizedOrigin)) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
-    if (!origin || !origins.has(origin)) return Response.json({ error: "origin_not_allowed" }, { status: 403 });
+    if (!normalizedOrigin || !origins.has(normalizedOrigin)) return Response.json({ error: "origin_not_allowed" }, { status: 403 });
     if (!env.BACKEND_API_URL || !env.API_AUTH_TOKEN) {
       return Response.json({ error: "api_gateway_not_configured" }, { status: 503, headers: corsHeaders(origin) });
     }
