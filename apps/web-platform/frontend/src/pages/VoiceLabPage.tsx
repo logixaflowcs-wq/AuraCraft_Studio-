@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, Play, Download, Mic, Radio, Sparkles, Sliders, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { lipSync } from '../audio/lipSyncAnalyzer';
 import { formatTtsRatePitch } from './voiceLabUtils';
+import { API_ENDPOINTS } from '../config/api';
 
 export const VoiceLabPage: React.FC = () => {
   const [selectedVoice, setSelectedVoice] = useState('my-MM-NilarNeural');
@@ -61,6 +62,22 @@ export const VoiceLabPage: React.FC = () => {
       desc: 'Vibrant, fast-paced and natural English creator voice.',
     },
     {
+      id: 'zh-CN-XiaoxiaoNeural',
+      name: 'Xiaoxiao',
+      country: '🇨🇳 China',
+      gender: 'Female',
+      badge: '🌏 Mandarin Narrator',
+      desc: 'Clear Mandarin Chinese narration for multilingual content.',
+    },
+    {
+      id: 'ko-KR-SunHiNeural',
+      name: 'SunHi',
+      country: '🇰🇷 South Korea',
+      gender: 'Female',
+      badge: '🎧 Korean Streamer',
+      desc: 'Bright Korean voice for streaming and character dialogue.',
+    },
+    {
       id: 'en-US-GuyNeural',
       name: 'Guy Tactical',
       country: '🇺🇸 United States',
@@ -68,7 +85,46 @@ export const VoiceLabPage: React.FC = () => {
       badge: '🎖️ Spec-Ops',
       desc: 'Steady, deep broadcast voice suited for military and corporate briefs.',
     },
+    {
+      id: 'en-US-AriaNeural',
+      name: 'Aria',
+      country: '🇺🇸 United States',
+      gender: 'Female',
+      badge: '🎙️ Expressive Narrator',
+      desc: 'Expressive US English voice for narration and explainers.',
+    },
   ];
+
+  const [voiceCatalog, setVoiceCatalog] = useState(VOICES);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(API_ENDPOINTS.voices)
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Voice catalog unavailable');
+        const records = await response.json();
+        if (!Array.isArray(records) || cancelled) return;
+        const catalog = records.map((record: { id: string; name: string; gender?: string; locale?: string; archetype?: string }) => {
+          const known = VOICES.find((voice) => voice.id === record.id);
+          if (known) return { ...known, gender: record.gender || known.gender };
+          const locale = record.locale || record.id.split('-').slice(0, 2).join('-');
+          const country = locale === 'zh-CN' ? '🇨🇳 China' : locale === 'ko-KR' ? '🇰🇷 South Korea' : locale === 'ja-JP' ? '🇯🇵 Japan' : locale === 'my-MM' ? '🇲🇲 Myanmar' : '🇺🇸 United States';
+          return {
+            id: record.id,
+            name: record.name || record.id,
+            country,
+            gender: record.gender || 'Voice',
+            badge: record.archetype || 'Neural Voice',
+            desc: record.name || record.id,
+          };
+        });
+        setVoiceCatalog(catalog);
+      })
+      .catch(() => {
+        // Keep the bundled free voice catalog available if the API is offline.
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const PRESET_SCRIPTS = [
     {
@@ -94,7 +150,7 @@ export const VoiceLabPage: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const backendUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/api/tts/synthesize';
+      const backendUrl = API_ENDPOINTS.tts;
       const ttsSettings = formatTtsRatePitch(rate, pitch);
       const res = await fetch(backendUrl, {
         method: 'POST',
@@ -179,11 +235,11 @@ export const VoiceLabPage: React.FC = () => {
         <div className="lg:col-span-5 space-y-3">
           <h2 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
             <Mic className="w-4 h-4 text-purple-400" />
-            Select Voice Persona ({VOICES.length})
+            Select Voice Persona ({voiceCatalog.length})
           </h2>
 
           <div className="space-y-2">
-            {VOICES.map((v) => {
+            {voiceCatalog.map((v) => {
               const isSelected = selectedVoice === v.id;
               return (
                 <div
