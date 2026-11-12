@@ -445,42 +445,40 @@ def health_check():
         "supported_voices": 8,
         "default_language": "my-MM",
         "supported_archetypes": ["anime", "army", "myanmar", "streamer"],
-        "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_GROUP_CHAT_ID),
+        "telegram_configured": _telegram_api_configured(),
     }
 
 
 @app.get("/api/telegram/test")
 async def telegram_bot_test():
-    # FIX(audit-3-G): proxy Telegram getMe server-side without exposing the bot token to the browser.
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
-    if not token:
-        raise HTTPException(status_code=503, detail="Telegram bot is not configured")
+    if not _telegram_api_configured():
+        raise HTTPException(status_code=503, detail="Telegram API proxy is not configured")
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            response = await client.get(f"https://api.telegram.org/bot{token}/getMe")
-        payload = response.json()
-        if not response.is_success or not payload.get("ok"):
-            raise HTTPException(status_code=502, detail="Telegram bot check failed")
-        bot = payload.get("result", {})
-        webhook_info = {}
-        webhook_response = await client.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
-        if webhook_response.is_success:
-            webhook_payload = webhook_response.json()
-            if webhook_payload.get("ok"):
-                info = webhook_payload.get("result", {})
-                webhook_info = {
-                    "webhook_configured": bool(info.get("url")),
-                    "webhook_url_matches": info.get("url") == os.getenv("TELEGRAM_WEBHOOK_URL", "").strip() if os.getenv("TELEGRAM_WEBHOOK_URL", "").strip() else None,
-                    "pending_update_count": info.get("pending_update_count", 0),
-                    "last_error_date": info.get("last_error_date"),
-                    "last_error_message": info.get("last_error_message"),
-                    "max_connections": info.get("max_connections"),
-                }
-        return {"ok": True, "username": bot.get("username"), "first_name": bot.get("first_name"), **webhook_info}
+            response = await client.get(_telegram_api_url("getMe"), headers=_telegram_api_headers())
+            payload = response.json()
+            if not response.is_success or not payload.get("ok"):
+                raise HTTPException(status_code=502, detail="Telegram bot check failed")
+            bot = payload.get("result", {})
+            webhook_response = await client.get(_telegram_api_url("getWebhookInfo"), headers=_telegram_api_headers())
+            webhook_info = {}
+            if webhook_response.is_success:
+                webhook_payload = webhook_response.json()
+                if webhook_payload.get("ok"):
+                    info = webhook_payload.get("result", {})
+                    webhook_info = {
+                        "webhook_configured": bool(info.get("url")),
+                        "webhook_url_matches": info.get("url") == os.getenv("TELEGRAM_WEBHOOK_URL", "").strip() if os.getenv("TELEGRAM_WEBHOOK_URL", "").strip() else None,
+                        "pending_update_count": info.get("pending_update_count", 0),
+                        "last_error_date": info.get("last_error_date"),
+                        "last_error_message": info.get("last_error_message"),
+                        "max_connections": info.get("max_connections"),
+                    }
+            return {"ok": True, "username": bot.get("username"), "first_name": bot.get("first_name"), **webhook_info}
     except HTTPException:
         raise
     except (httpx.HTTPError, ValueError):
-        logger.exception("Telegram getMe check failed")
+        logger.exception("Telegram bot check failed")
         raise HTTPException(status_code=502, detail="Telegram bot check failed")
 
 
@@ -511,6 +509,29 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
 
 
+def _telegram_api_configured() -> bool:
+    return bool(os.getenv("TELEGRAM_API_PROXY_URL", "").strip() or os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN.strip())
+
+
+def _telegram_api_url(method: str) -> str:
+    proxy = os.getenv("TELEGRAM_API_PROXY_URL", "").strip().rstrip("/")
+    if proxy:
+        return f"{proxy}/{method}"
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
+    if not token:
+        raise HTTPException(status_code=503, detail="Telegram bot is not configured")
+    return f"https://api.telegram.org/bot{token}/{method}"
+
+
+def _telegram_api_headers() -> dict[str, str]:
+    if os.getenv("TELEGRAM_API_PROXY_URL", "").strip():
+        api_token = os.getenv("API_AUTH_TOKEN", "").strip()
+        if not api_token:
+            raise HTTPException(status_code=503, detail="Telegram API proxy authentication is not configured")
+        return {"Authorization": f"Bearer {api_token}"}
+    return {}
+
+
 def _production_mode() -> bool:
     environment = os.getenv("ENV", "").strip() or os.getenv("ENVIRONMENT", "").strip() or os.getenv("APP_ENV", "development").strip()
     return environment.lower() in {"production", "prod"}
@@ -518,12 +539,11 @@ def _production_mode() -> bool:
 
 async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
     """Send real message back to Telegram group topic #215 using Bot API."""
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
-    if not token:
+    if not _telegram_api_configured():
         return False
 
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    url = _telegram_api_url("sendMessage")
+    headers = _telegram_api_headers()
     payload = {
         "chat_id": chat_id,
         "message_thread_id": thread_id,
@@ -533,7 +553,7 @@ async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
     }
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers=headers)
             if not resp.is_success:
                 logger.error("Telegram sendMessage returned HTTP %s", resp.status_code)
                 return False
@@ -545,10 +565,10 @@ async def send_telegram_reply(chat_id: Any, thread_id: Any, text: str) -> bool:
 
 async def send_telegram_audio(chat_id: Any, thread_id: Any, audio_bytes: bytes) -> str | None:
     # FIX(audit-2-B): deliver generated Edge-TTS bytes through Telegram sendAudio and return its file_id.
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
-    if not token:
+    if not _telegram_api_configured():
         return None
-    url = f"https://api.telegram.org/bot{token}/sendAudio"
+    url = _telegram_api_url("sendAudio")
+    headers = _telegram_api_headers()
     data = {"chat_id": str(chat_id), "message_thread_id": str(thread_id)}
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -556,6 +576,7 @@ async def send_telegram_audio(chat_id: Any, thread_id: Any, audio_bytes: bytes) 
                 url,
                 data=data,
                 files={"audio": ("auracraft-speech.mp3", audio_bytes, "audio/mpeg")},
+                headers=headers,
             )
         payload = response.json()
         if not response.is_success or not payload.get("ok"):
@@ -569,16 +590,17 @@ async def send_telegram_audio(chat_id: Any, thread_id: Any, audio_bytes: bytes) 
 
 async def send_telegram_document(chat_id: Any, thread_id: Any, filename: str, content: bytes) -> str | None:
     # FIX(audit-2-B): export the actual backend persona pack as a Telegram document.
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
-    if not token:
+    if not _telegram_api_configured():
         return None
-    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    url = _telegram_api_url("sendDocument")
+    headers = _telegram_api_headers()
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 url,
                 data={"chat_id": str(chat_id), "message_thread_id": str(thread_id)},
                 files={"document": (filename, content, "application/json")},
+                headers=headers,
             )
         payload = response.json()
         if not response.is_success or not payload.get("ok"):
@@ -764,9 +786,9 @@ def _import_aura_archive(archive_bytes: bytes, chars: list[dict[str, Any]]) -> d
 @app.on_event("startup")
 async def register_telegram_commands_on_startup():
     """Register Topic #215 commands into Telegram's Bot menu using setMyCommands."""
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip() or TELEGRAM_GROUP_CHAT_ID
-    if not token:
+    if not _telegram_api_configured():
+        logger.warning("Telegram registration skipped: configure TELEGRAM_API_PROXY_URL or TELEGRAM_BOT_TOKEN")
         return
     commands = [
         {"command": "start", "description": "Connect to AuraCraft Studio (Topic 215)"},
@@ -787,25 +809,23 @@ async def register_telegram_commands_on_startup():
             pass
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(f"https://api.telegram.org/bot{token}/setMyCommands", json=payload)
+            resp = await client.post(_telegram_api_url("setMyCommands"), json=payload, headers=_telegram_api_headers())
             if resp.status_code == 200 and resp.json().get("ok"):
                 logger.info("Telegram bot commands registered")
             else:
                 logger.warning("Telegram setMyCommands failed with HTTP %s", resp.status_code)
 
             webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "").strip()
-            webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
-            allowed_users = _allowed_telegram_user_ids()
-            if webhook_url and webhook_secret and allowed_users and TELEGRAM_GROUP_CHAT_ID and TELEGRAM_TOPIC_ID > 0:
+            if webhook_url:
                 webhook_response = await client.post(
-                    f"https://api.telegram.org/bot{token}/setWebhook",
+                    _telegram_api_url("setWebhook"),
                     json={
                         "url": webhook_url,
-                        "secret_token": webhook_secret,
                         "allowed_updates": ["message"],
                         "drop_pending_updates": False,
                         "max_connections": 10,
                     },
+                    headers=_telegram_api_headers(),
                 )
                 webhook_payload = webhook_response.json()
                 if not webhook_response.is_success or not webhook_payload.get("ok"):
@@ -813,7 +833,7 @@ async def register_telegram_commands_on_startup():
                 else:
                     logger.info("Telegram webhook registered successfully")
             else:
-                logger.warning("Telegram webhook registration skipped: webhook URL, secret, group/topic, and user allowlist must all be configured")
+                logger.warning("Telegram webhook registration skipped: TELEGRAM_WEBHOOK_URL is not configured")
     except (httpx.HTTPError, ValueError):
         logger.exception("Telegram startup registration failed")
 
