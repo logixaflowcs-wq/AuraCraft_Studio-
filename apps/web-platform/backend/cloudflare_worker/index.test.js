@@ -43,7 +43,7 @@ test("worker rejects declared and actual oversized bodies", async () => {
   assert.equal(actual.status, 413);
 });
 
-test("worker forwards updates to the canonical FastAPI webhook", async () => {
+test("worker validates Telegram access policy before forwarding verified updates", async () => {
   const originalFetch = globalThis.fetch;
   let forwarded;
   globalThis.fetch = async (url, init) => {
@@ -51,24 +51,116 @@ test("worker forwards updates to the canonical FastAPI webhook", async () => {
     return Response.json({ ok: true, action: "status" });
   };
   try {
-    const body = JSON.stringify({ message: { text: "/status" } });
+    const body = JSON.stringify({ message: {
+      text: "/status",
+      chat: { id: -1003992125718 },
+      message_thread_id: 215,
+      from: { id: 123456 },
+    } });
     const response = await worker.fetch(new Request("https://worker.example/webhook", {
       method: "POST",
       headers: { "X-Telegram-Bot-Api-Secret-Token": "test-secret" },
       body,
     }), {
       TELEGRAM_WEBHOOK_SECRET: "test-secret",
+      TELEGRAM_GROUP_CHAT_ID: "-1003992125718",
+      TELEGRAM_TOPIC_ID: "215",
+      TELEGRAM_ALLOWED_USER_IDS: "123456,654321",
       BACKEND_API_URL: "https://api.example.com",
+      API_AUTH_TOKEN: "server-only-token",
     });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { ok: true, action: "status" });
     assert.equal(forwarded.url, "https://api.example.com/api/telegram/webhook");
-    assert.equal(forwarded.init.headers["X-Telegram-Bot-Api-Secret-Token"], "test-secret");
+    assert.equal(forwarded.init.headers.Authorization, "Bearer server-only-token");
+    assert.equal(forwarded.init.headers["X-AuraCraft-Worker-Verified"], "true");
+    assert.equal(forwarded.init.headers["X-Telegram-Bot-Api-Secret-Token"], undefined);
     assert.equal(forwarded.init.body, body);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("worker ignores Telegram updates from users outside the allowlist", async () => {
+  const response = await worker.fetch(new Request("https://worker.example/webhook", {
+    method: "POST",
+    headers: { "X-Telegram-Bot-Api-Secret-Token": "test-secret" },
+    body: JSON.stringify({ message: {
+      text: "/status",
+      chat: { id: -1003992125718 },
+      message_thread_id: 215,
+      from: { id: 999999 },
+    } }),
+  }), {
+    TELEGRAM_WEBHOOK_SECRET: "test-secret",
+    TELEGRAM_GROUP_CHAT_ID: "-1003992125718",
+    TELEGRAM_TOPIC_ID: "215",
+    TELEGRAM_ALLOWED_USER_IDS: "123456",
+    BACKEND_API_URL: "https://api.example.com",
+    API_AUTH_TOKEN: "server-only-token",
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, ignored: "unauthorized_user" });
+});
+
+test("backend-only Telegram API proxy authenticates and injects the bot token", async () => {
+  const originalFetch = globalThis.fetch;
+  let forwarded;
+  globalThis.fetch = async (url, init) => {
+    forwarded = { url: String(url), init };
+    return Response.json({ ok: true, result: { message_id: 7 } });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://worker.example/telegram-api/sendMessage", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer server-only-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chat_id: 1, text: "hello" }),
+    }), {
+      API_AUTH_TOKEN: "server-only-token",
+      TELEGRAM_BOT_TOKEN: "private-bot-token",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(forwarded.url, "https://api.telegram.org/botprivate-bot-token/sendMessage");
+    assert.equal(forwarded.init.headers.get("Authorization"), null);
+    assert.deepEqual(await response.json(), { ok: true, result: { message_id: 7 } });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Telegram API proxy injects the Worker-held webhook secret", async () => {
+  const originalFetch = globalThis.fetch;
+  let forwarded;
+  globalThis.fetch = async (url, init) => {
+    forwarded = { url: String(url), init };
+    return Response.json({ ok: true });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://worker.example/telegram-api/setWebhook", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer server-only-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url: "https://worker.example/webhook" }),
+    }), {
+      API_AUTH_TOKEN: "server-only-token",
+      TELEGRAM_BOT_TOKEN: "private-bot-token",
+      TELEGRAM_WEBHOOK_SECRET: "private-webhook-secret",
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(JSON.parse(forwarded.init.body), {
+      url: "https://worker.example/webhook",
+      secret_token: "private-webhook-secret",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 
 test("browser API proxy injects the server-side bearer token and forwards client IP", async () => {
   const originalFetch = globalThis.fetch;
