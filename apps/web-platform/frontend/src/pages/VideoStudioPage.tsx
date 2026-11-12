@@ -439,6 +439,7 @@ export const VideoStudioPage: React.FC = () => {
           <div className="flex items-center gap-1 bg-[#111726] border border-[#23314f] p-1 rounded-xl text-xs">
             <button
               onClick={() => setAspectRatio('9:16')}
+              disabled={isRenderingVideo}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-semibold transition-all ${
                 aspectRatio === '9:16'
                   ? 'bg-purple-600 text-white shadow-md'
@@ -450,6 +451,7 @@ export const VideoStudioPage: React.FC = () => {
             </button>
             <button
               onClick={() => setAspectRatio('16:9')}
+              disabled={isRenderingVideo}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-semibold transition-all ${
                 aspectRatio === '16:9'
                   ? 'bg-purple-600 text-white shadow-md'
@@ -633,6 +635,7 @@ export const VideoStudioPage: React.FC = () => {
             >
               {isRenderingVideo ? <><Loader2 className="w-4 h-4 animate-spin" /> Rendering {renderProgress}%</> : <><Play className="w-4 h-4" /> Render Video (MP4 / WebM)</>}
             </button>
+            {showVideoStage && avatarModelStatus === 'loading' && <p className="text-xs text-slate-400">Loading the selected 3D avatar…</p>}
             {videoRenderError && <p role="alert" className="text-xs text-rose-300">{videoRenderError}</p>}
             {videoRenderNotice && <p className="text-xs text-amber-300">{videoRenderNotice}</p>}
             {renderedVideoUrl && (
