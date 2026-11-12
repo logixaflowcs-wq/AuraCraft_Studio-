@@ -8,6 +8,7 @@ export const VideoStudioPage: React.FC = () => {
   const [characterName, setCharacterName] = useState('Shinji Kazama (シンジ)');
   const [selectedCharacterId, setSelectedCharacterId] = useState('char_anime_shinji');
   const [availableCharacters, setAvailableCharacters] = useState<Array<{ id: string; name: string; voice_id?: string }>>([]);
+  const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [voiceId, setVoiceId] = useState('my-MM-NilarNeural');
   const [durationPerScene, setDurationPerScene] = useState(6);
@@ -53,8 +54,14 @@ export const VideoStudioPage: React.FC = () => {
         const selected = records.find((item) => item.id === selectedCharacterId) || records[0];
         setSelectedCharacterId(selected.id);
         setCharacterName(selected.name);
+        if (selected.voice_id) setVoiceId(selected.voice_id);
       }
     }).catch(() => setGenerationError('Character list could not be loaded; check backend availability.'));
+    fetch(API_ENDPOINTS.voices).then(async (response) => {
+      if (!response.ok) throw new Error('Voice list unavailable');
+      const voices = await response.json();
+      if (Array.isArray(voices)) setAvailableVoices(voices);
+    }).catch(() => setVideoRenderError('Voice list could not be loaded; check backend availability.'));
   }, []);
 
   const addScene = () => {
@@ -146,8 +153,12 @@ export const VideoStudioPage: React.FC = () => {
 
   const handleRenderVideo = async () => {
     if (!scenes.length || isRenderingVideo) return;
-    if (!('MediaRecorder' in window) || !HTMLCanvasElement.prototype.captureStream) {
-      setVideoRenderError('ဤ browser တွင် WebM video rendering မပံ့ပိုးပါ။ Chrome သို့မဟုတ် Edge နောက်ဆုံးဗားရှင်းကို အသုံးပြုပါ။');
+    if (scenes.length > 10) {
+      setVideoRenderError('Edge-TTS rate limit အတွက် scene ၁၀ ခုထက်မပိုစေရန် ခွဲပြီး render လုပ်ပါ။');
+      return;
+    }
+    if (!('MediaRecorder' in window) || !HTMLCanvasElement.prototype.captureStream || !('AudioContext' in window)) {
+      setVideoRenderError('ဤ browser တွင် audio/video recording မပံ့ပိုးပါ။ Chrome သို့မဟုတ် Edge နောက်ဆုံးဗားရှင်းကို အသုံးပြုပါ။');
       return;
     }
     setIsRenderingVideo(true);
@@ -168,8 +179,13 @@ export const VideoStudioPage: React.FC = () => {
       return;
     }
 
-    const drawScene = (scene: typeof scenes[number], index: number, elapsed: number) => {
-      const progress = Math.min(1, elapsed / durationPerScene);
+    const audioContext = new AudioContext();
+    let canvasStream: MediaStream | null = null;
+    let combinedStream: MediaStream | null = null;
+    let recorder: MediaRecorder | null = null;
+
+    const drawScene = (scene: typeof scenes[number], index: number, elapsed: number, sceneDuration: number) => {
+      const progress = Math.min(1, elapsed / sceneDuration);
       const gradient = ctx.createLinearGradient(0, 0, width, height);
       gradient.addColorStop(0, '#10172b');
       gradient.addColorStop(0.55, '#25154b');
@@ -198,7 +214,6 @@ export const VideoStudioPage: React.FC = () => {
       const maxWidth = width * 0.84;
       const lines: string[] = [];
       let line = '';
-      // Myanmar text often has no spaces between words, so wrap by Unicode code point.
       for (const character of Array.from(scene.script)) {
         const candidate = line + character;
         if (line && ctx.measureText(candidate).width > maxWidth) {
@@ -217,41 +232,77 @@ export const VideoStudioPage: React.FC = () => {
       ctx.fillRect(width * 0.08, height * 0.88, width * 0.84 * progress, 6);
       ctx.fillStyle = '#94a3b8';
       ctx.font = '16px system-ui, sans-serif';
-      ctx.fillText('Storyboard export • Silent video • WebM', width * 0.08, height * 0.92);
+      ctx.fillText('AuraCraft Studio • Edge-TTS narration • WebM', width * 0.08, height * 0.92);
     };
 
-    const stream = canvas.captureStream(30);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-      ? 'video/webm;codecs=vp9'
-      : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const chunks: BlobPart[] = [];
-    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-    const finished = new Promise<Blob>((resolve, reject) => {
-      recorder.onerror = () => reject(new Error('Video encoding failed.'));
-      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
-    });
-
     try {
+      await audioContext.resume();
+      const audioBuffers: AudioBuffer[] = [];
+      for (let index = 0; index < scenes.length; index += 1) {
+        const response = await fetch(API_ENDPOINTS.tts, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: scenes[index].script, voice: voiceId, rate: '+0%', pitch: '+0Hz' }),
+        });
+        if (!response.ok) throw new Error(`Edge-TTS synthesis failed for scene ${index + 1} (${response.status}).`);
+        const audioData = await response.arrayBuffer();
+        audioBuffers.push(await audioContext.decodeAudioData(audioData));
+      }
+
+      const audioDestination = audioContext.createMediaStreamDestination();
+      canvasStream = canvas.captureStream(30);
+      combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioDestination.stream.getAudioTracks(),
+      ]);
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm';
+      recorder = new MediaRecorder(combinedStream, { mimeType });
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      const finished = new Promise<Blob>((resolve, reject) => {
+        if (!recorder) return reject(new Error('Video recorder could not start.'));
+        recorder.onerror = () => reject(new Error('Video encoding failed.'));
+        recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+      });
+
+      let audioStart = audioContext.currentTime + 0.25;
+      audioBuffers.forEach((buffer) => {
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioDestination);
+        source.start(audioStart);
+        audioStart += buffer.duration;
+      });
+
       recorder.start(250);
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
       const frameMs = 1000 / 30;
-      const totalFrames = Math.max(1, Math.round(durationPerScene * 30));
+      const totalDuration = audioBuffers.reduce((sum, buffer) => sum + buffer.duration, 0);
+      let renderedSeconds = 0;
       for (let sceneIndex = 0; sceneIndex < scenes.length; sceneIndex += 1) {
+        const sceneDuration = audioBuffers[sceneIndex].duration;
+        const totalFrames = Math.max(1, Math.ceil(sceneDuration * 30));
         for (let frame = 0; frame < totalFrames; frame += 1) {
-          drawScene(scenes[sceneIndex], sceneIndex, frame / 30);
-          setRenderProgress(Math.round(((sceneIndex * totalFrames + frame + 1) / (scenes.length * totalFrames)) * 100));
+          drawScene(scenes[sceneIndex], sceneIndex, frame / 30, sceneDuration);
+          setRenderProgress(Math.min(100, Math.round(((renderedSeconds + frame / 30) / totalDuration) * 100)));
           await new Promise((resolve) => window.setTimeout(resolve, frameMs));
         }
+        renderedSeconds += sceneDuration;
       }
       recorder.stop();
       const blob = await finished;
       if (!blob.size) throw new Error('The browser produced an empty video file.');
+      setRenderProgress(100);
       setRenderedVideoUrl(URL.createObjectURL(blob));
     } catch (error) {
-      if (recorder.state !== 'inactive') recorder.stop();
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
       setVideoRenderError(error instanceof Error ? error.message : 'Video rendering failed.');
     } finally {
-      stream.getTracks().forEach((track) => track.stop());
+      canvasStream?.getTracks().forEach((track) => track.stop());
+      combinedStream?.getTracks().forEach((track) => track.stop());
+      await audioContext.close().catch(() => undefined);
       setIsRenderingVideo(false);
     }
   };
@@ -408,7 +459,10 @@ export const VideoStudioPage: React.FC = () => {
                   onChange={(e) => {
                     const selected = availableCharacters.find((item) => item.id === e.target.value);
                     setSelectedCharacterId(e.target.value);
-                    if (selected) setCharacterName(selected.name);
+                    if (selected) {
+                      setCharacterName(selected.name);
+                      if (selected.voice_id) setVoiceId(selected.voice_id);
+                    }
                   }}
                   className="w-full bg-[#0a0d14] border border-[#23314f] rounded-xl px-3 py-2 text-slate-100 text-xs"
                 >
@@ -416,6 +470,18 @@ export const VideoStudioPage: React.FC = () => {
                     <option key={character.id} value={character.id}>{character.name}</option>
                   ))}
                   {!availableCharacters.length && <option value={selectedCharacterId}>{characterName}</option>}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Narration Voice (Edge-TTS)</label>
+                <select
+                  value={voiceId}
+                  onChange={(e) => setVoiceId(e.target.value)}
+                  className="w-full bg-[#0a0d14] border border-[#23314f] rounded-xl px-3 py-2 text-slate-100 text-xs"
+                >
+                  {availableVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
+                  {!availableVoices.length && <option value={voiceId}>{voiceId}</option>}
                 </select>
               </div>
 
@@ -457,8 +523,8 @@ export const VideoStudioPage: React.FC = () => {
 
           <div className="bg-[#111726]/80 border border-[#1f293d] rounded-2xl p-5 space-y-3">
             <div>
-              <h3 className="text-sm font-bold text-white">Render actual storyboard video</h3>
-              <p className="text-xs text-slate-400 mt-1">Browser-side silent WebM export. This renders animated scene cards and dialogue captions; it does not render a 3D avatar or narration audio.</p>
+              <h3 className="text-sm font-bold text-white">Render narrated storyboard video</h3>
+              <p className="text-xs text-slate-400 mt-1">Browser-side narrated WebM export using the selected Edge-TTS voice. It renders animated scene cards and captions; 3D avatar animation is not included.</p>
             </div>
             <button
               onClick={handleRenderVideo}
