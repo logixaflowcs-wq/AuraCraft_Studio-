@@ -1024,9 +1024,11 @@ def get_voices():
         {"id": "my-MM-ThihaNeural", "name": "Thiha (Burmese Male Anchor/Officer)", "gender": "Male", "locale": "my-MM", "archetype": "army_myanmar"},
         {"id": "ja-JP-NanamiNeural", "name": "Nanami (Japanese Anime Heroine/Idol)", "gender": "Female", "locale": "ja-JP", "archetype": "anime"},
         {"id": "ja-JP-KeitaNeural", "name": "Keita (Japanese Anime Protagonist/Hero)", "gender": "Male", "locale": "ja-JP", "archetype": "anime"},
+        {"id": "zh-CN-XiaoxiaoNeural", "name": "Xiaoxiao (Chinese Mandarin Narrator)", "gender": "Female", "locale": "zh-CN", "archetype": "narrator"},
+        {"id": "ko-KR-SunHiNeural", "name": "SunHi (Korean Streamer)", "gender": "Female", "locale": "ko-KR", "archetype": "streamer"},
         {"id": "en-US-JennyNeural", "name": "Jenny (US English Streamer/Cyberpunk)", "gender": "Female", "locale": "en-US", "archetype": "streamer"},
         {"id": "en-US-GuyNeural", "name": "Guy (US English Tactical Commander)", "gender": "Male", "locale": "en-US", "archetype": "army"},
-        {"id": "en-US-AriaNeural", "name": "Aria (US English Expressive/Narrator)", "gender": "Female", "locale": "en-US", "archetype": "streamer"},
+        {"id": "en-US-AriaNeural", "name": "Aria (US English Expressive/Narrator)", "gender": "Female", "locale": "en-US", "archetype": "narrator"},
     ]
 
 
