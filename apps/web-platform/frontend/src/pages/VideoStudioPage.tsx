@@ -1,13 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Clapperboard, Video, Plus, Trash2, Download, Check, Sparkles, Smartphone, Monitor, Clock, Play, Loader2 } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
 import { createSceneId } from './videoStudioUtils';
+import { Viewport3D } from '../components/Viewport3D';
 
 export const VideoStudioPage: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<'9:16' | '16:9'>('9:16');
   const [characterName, setCharacterName] = useState('Shinji Kazama (シンジ)');
   const [selectedCharacterId, setSelectedCharacterId] = useState('char_anime_shinji');
-  const [availableCharacters, setAvailableCharacters] = useState<Array<{ id: string; name: string; voice_id?: string }>>([]);
+  const [availableCharacters, setAvailableCharacters] = useState<Array<{ id: string; name: string; voice_id?: string; vrm_model?: string }>>([]);
+  const [selectedModelUrl, setSelectedModelUrl] = useState('/models/avatar_female_c.vrm');
+  const [showVideoStage, setShowVideoStage] = useState(false);
+  const [isAvatarSpeaking, setIsAvatarSpeaking] = useState(false);
+  const [avatarEmotion, setAvatarEmotion] = useState('neutral');
+  const [avatarModelStatus, setAvatarModelStatus] = useState<'idle' | 'loading' | 'vrm' | 'procedural'>('idle');
+  const avatarCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const avatarModelStatusRef = useRef<'idle' | 'loading' | 'vrm' | 'procedural'>('idle');
+  const resolveAvatarStageRef = useRef<((canvas: HTMLCanvasElement) => void) | null>(null);
   const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [voiceId, setVoiceId] = useState('my-MM-NilarNeural');
@@ -55,6 +64,7 @@ export const VideoStudioPage: React.FC = () => {
         const selected = records.find((item) => item.id === selectedCharacterId) || records[0];
         setSelectedCharacterId(selected.id);
         setCharacterName(selected.name);
+        setSelectedModelUrl(selected.vrm_model || '/models/avatar_female_c.vrm');
         if (selected.voice_id) setVoiceId(selected.voice_id);
       }
     }).catch(() => setGenerationError('Character list could not be loaded; check backend availability.'));
@@ -63,6 +73,38 @@ export const VideoStudioPage: React.FC = () => {
       const voices = await response.json();
       if (Array.isArray(voices)) setAvailableVoices(voices);
     }).catch(() => setVideoRenderError('Voice list could not be loaded; check backend availability.'));
+  }, []);
+
+  const handleAvatarCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
+    avatarCanvasRef.current = canvas;
+    if (canvas && avatarModelStatusRef.current !== 'loading' && resolveAvatarStageRef.current) {
+      resolveAvatarStageRef.current(canvas);
+    }
+  }, []);
+
+  const handleAvatarModelLoadStateChange = useCallback((status: 'loading' | 'vrm' | 'procedural') => {
+    avatarModelStatusRef.current = status;
+    setAvatarModelStatus(status);
+    if (status !== 'loading' && avatarCanvasRef.current && resolveAvatarStageRef.current) {
+      resolveAvatarStageRef.current(avatarCanvasRef.current);
+    }
+  }, []);
+
+  const waitForAvatarStage = useCallback((): Promise<HTMLCanvasElement> => {
+    avatarModelStatusRef.current = 'loading';
+    setAvatarModelStatus('loading');
+    setShowVideoStage(true);
+    return new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        resolveAvatarStageRef.current = null;
+        reject(new Error('3D avatar stage did not finish loading within 30 seconds.'));
+      }, 30000);
+      resolveAvatarStageRef.current = (canvas) => {
+        window.clearTimeout(timeout);
+        resolveAvatarStageRef.current = null;
+        resolve(canvas);
+      };
+    });
   }, []);
 
   const addScene = () => {
