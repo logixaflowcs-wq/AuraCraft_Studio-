@@ -50,6 +50,41 @@ export default {
       return Response.json({ status: "healthy", service: "AuraCraft Studio Edge Gateway" });
     }
 
+    // Read-only readiness endpoint: public navigation may omit Origin, while browser fetches
+    // still receive CORS headers only for the explicitly allowed frontend origin.
+    if (request.method === "GET" && url.pathname === "/ready") {
+      const origin = request.headers.get("Origin") || "";
+      const normalizedOrigin = normalizeOrigin(origin);
+      const origins = allowedOrigins(env);
+      if (origin && (!normalizedOrigin || !origins.has(normalizedOrigin))) {
+        return Response.json({ error: "origin_not_allowed" }, { status: 403 });
+      }
+      if (!env.BACKEND_API_URL || !env.API_AUTH_TOKEN) {
+        return Response.json({ error: "api_gateway_not_configured" }, { status: 503, headers: origin ? corsHeaders(origin) : {} });
+      }
+      try {
+        const backend = new URL("/ready", env.BACKEND_API_URL);
+        if (backend.protocol !== "https:") {
+          return Response.json({ error: "backend_not_configured" }, { status: 503, headers: origin ? corsHeaders(origin) : {} });
+        }
+        const response = await fetch(backend.toString(), {
+          method: "GET",
+          headers: { "Authorization": `Bearer ${env.API_AUTH_TOKEN}` },
+          redirect: "manual",
+        });
+        const headers = new Headers({
+          "Content-Type": response.headers.get("Content-Type") || "application/json",
+        });
+        if (origin) {
+          for (const [key, value] of Object.entries(corsHeaders(origin))) headers.set(key, value);
+        }
+        return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      } catch (error) {
+        console.error("Backend readiness proxy failed", error);
+        return Response.json({ error: "backend_readiness_failed" }, { status: 502, headers: origin ? corsHeaders(origin) : {} });
+      }
+    }
+
     // Backend-only Telegram Bot API proxy: the bot token stays in this Worker secret store.
     if (url.pathname.startsWith("/telegram-api/")) {
       if (!["GET", "POST"].includes(request.method)) return new Response("Method not allowed", { status: 405 });
