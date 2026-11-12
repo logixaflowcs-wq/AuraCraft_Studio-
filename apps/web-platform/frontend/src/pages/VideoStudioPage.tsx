@@ -261,12 +261,10 @@ export const VideoStudioPage: React.FC = () => {
       });
 
       let audioStart = audioContext.currentTime + 0.25;
-      const audioStarts: number[] = [];
       audioBuffers.forEach((buffer) => {
         const source = audioContext.createBufferSource();
         source.buffer = buffer;
         source.connect(audioDestination);
-        audioStarts.push(audioStart);
         source.start(audioStart);
         audioStart += buffer.duration;
       });
