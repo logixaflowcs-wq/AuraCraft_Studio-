@@ -216,8 +216,9 @@ def test_telegram_get_me_proxy_returns_only_public_bot_identity(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, headers=None):
             assert url.endswith("/getMe")
+            assert isinstance(headers, dict)
             return FakeResponse()
 
     monkeypatch.setattr(main, "TELEGRAM_BOT_TOKEN", "test-token")
