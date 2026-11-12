@@ -446,7 +446,7 @@ export default function App() {
       <main className="flex-1 overflow-hidden relative flex">
         {/* TAB 1: PRODUCTION 3-PANEL STUDIO STAGE */}
         {activeTab === 'studio' && (
-          <div className="flex-1 flex h-full w-full overflow-hidden">
+          <div className="flex-1 flex flex-col xl:flex-row h-full w-full overflow-y-auto xl:overflow-hidden">
             {/* 1. LEFT PANEL: Tool Shelf & Character Presets Roster */}
             <StudioLeftPanel
               stageMode={stageMode}
@@ -477,7 +477,7 @@ export default function App() {
             />
 
             {/* 2. CENTER STAGE: The Hero Viewport (Photo or 3D) */}
-            <div className="flex-1 flex flex-col relative h-full bg-[#0a0d14] overflow-hidden">
+            <div className="flex-1 flex flex-col relative min-h-[45vh] xl:min-h-0 xl:h-full bg-[#0a0d14] overflow-hidden">
               <div className="w-full h-full">
                 {stageMode === 'photo' ? (
                   <LivePhotoStage
@@ -534,7 +534,7 @@ export default function App() {
             </div>
 
             {/* 3. RIGHT SIDEBAR: Speech Synthesis Engine, Emotions, API Monitor, Stream Settings */}
-            <aside className="w-84 border-l border-[#1f293d] bg-[#0c101c]/95 flex flex-col p-3 gap-3 overflow-y-auto z-30 shadow-2xl flex-shrink-0">
+            <aside className="w-full xl:w-84 max-h-[45vh] xl:max-h-none xl:h-full border-t xl:border-t-0 xl:border-l border-[#1f293d] bg-[#0c101c]/95 flex flex-col p-3 gap-3 overflow-y-auto z-30 shadow-2xl flex-shrink-0">
               <VoiceSelector
                 currentVoice={currentVoice}
                 lang={lang}
