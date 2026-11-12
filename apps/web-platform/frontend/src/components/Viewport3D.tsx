@@ -586,6 +586,7 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
       antialias: true,
       alpha: true,
       powerPreference: 'high-performance',
+      preserveDrawingBuffer: Boolean(onCanvasReady),
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
