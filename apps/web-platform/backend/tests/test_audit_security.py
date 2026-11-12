@@ -217,7 +217,7 @@ def test_telegram_get_me_proxy_returns_only_public_bot_identity(monkeypatch):
             return None
 
         async def get(self, url, headers=None):
-            assert url.endswith("/getMe")
+            assert url.endswith(("/getMe", "/getWebhookInfo"))
             assert isinstance(headers, dict)
             return FakeResponse()
 
