@@ -20,6 +20,8 @@ interface Viewport3DProps {
   currentModelName?: string;
   lang?: Language;
   onModelChange?: (url: string, name: string) => void;
+  onCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
+  onModelLoadStateChange?: (state: 'loading' | 'vrm' | 'procedural') => void;
 }
 
 type CameraPreset = 'face' | 'bust' | 'full';
@@ -111,6 +113,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   currentModelName = '🌸 Sakura (Anime Idol)',
   lang = 'en',
   onModelChange,
+  onCanvasReady,
+  onModelLoadStateChange,
 }) => {
   const t = translations[lang] || translations.en;
   const mountRef = useRef<HTMLDivElement>(null);
@@ -222,6 +226,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     if (!scene) return;
 
     setModelLoading(true);
+    onModelLoadStateChange?.('loading');
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
 
@@ -230,6 +235,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (!vrm) {
         console.warn('GLTF parsed but no VRM data found, keeping fallback');
         setModelLoading(false);
+        onModelLoadStateChange?.('procedural');
         return;
       }
 
@@ -268,6 +274,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       setAvatarMode('vrm');
       setModelName(name);
       setModelLoading(false);
+      onModelLoadStateChange?.('vrm');
 
       // Re-apply custom hair color if set
       if (selectedHairColor) {
@@ -312,6 +319,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const onError = (error: any) => {
       console.error('Failed to load VRM model:', error);
       setModelLoading(false);
+      onModelLoadStateChange?.('procedural');
       if (proceduralGroupRef.current) {
         proceduralGroupRef.current.visible = true;
       }
@@ -578,12 +586,14 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
       antialias: true,
       alpha: true,
       powerPreference: 'high-performance',
+      preserveDrawingBuffer: Boolean(onCanvasReady),
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+    onCanvasReady?.(renderer.domElement);
 
     // 4. OrbitControls (Full 360° mouse rotation, zoom in/out to see full body)
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -858,13 +868,14 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
       currentVrmRef.current = null;
       sceneRef.current = null;
       rendererRef.current = null;
+      onCanvasReady?.(null);
       cameraRef.current = null;
       controlsRef.current = null;
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, []);
+  }, [onCanvasReady, onModelLoadStateChange]);
 
   // FIX(audit-3-C): keep animation state current without rebuilding the WebGL scene.
   useEffect(() => {
