@@ -22,20 +22,12 @@ services:
         value: https://auracraft-backend-dt1u.onrender.com
       - key: ALLOWED_ORIGINS
         value: https://auracraft-studio.onrender.com
-      - key: TELEGRAM_GROUP_CHAT_ID
-        sync: false
-      - key: TELEGRAM_TOPIC_ID
-        sync: false
-      - key: TELEGRAM_ALLOWED_USER_IDS
-        sync: false
       - key: API_AUTH_TOKEN
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_WEBHOOK_SECRET
         sync: false
       - key: TELEGRAM_WEBHOOK_URL
         value: https://auracraft-studio-telegram-worker.auracraftstudio.workers.dev/webhook
+      - key: TELEGRAM_API_PROXY_URL
+        value: https://auracraft-studio-telegram-worker.auracraftstudio.workers.dev/telegram-api
       - key: TELEGRAM_IMPORT_ALLOWED_HOSTS
         sync: false
     rootDir: apps/web-platform/backend
