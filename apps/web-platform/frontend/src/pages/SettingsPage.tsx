@@ -12,7 +12,7 @@ export const SettingsPage: React.FC = () => {
   const checkHealth = async () => {
     setApiStatus('checking');
     try {
-      const res = await fetch(API_ENDPOINTS.health, { method: 'GET' });
+      const res = await fetch(API_BASE_URL + '/ready', { method: 'GET' });
       if (res.ok) setApiStatus('online');
       else setApiStatus('offline');
     } catch {
