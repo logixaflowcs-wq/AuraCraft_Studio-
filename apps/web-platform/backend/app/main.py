@@ -442,7 +442,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "AuraCraft Studio Backend",
-        "supported_voices": 8,
+        "supported_voices": 9,
         "default_language": "my-MM",
         "supported_archetypes": ["anime", "army", "myanmar", "streamer"],
         "telegram_configured": _telegram_api_configured(),
@@ -1018,7 +1018,7 @@ async def telegram_webhook(
 
 @app.get("/api/tts/voices")
 def get_voices():
-    """Return catalog of zero-cost Edge-TTS voices covering Burmese, Japanese Anime, and English."""
+    """Return the shared zero-cost Edge-TTS catalog for Burmese, Japanese, Mandarin, Korean, and English."""
     return [
         {"id": "my-MM-NilarNeural", "name": "Nilar (Burmese Female Cultural Host)", "gender": "Female", "locale": "my-MM", "archetype": "myanmar"},
         {"id": "my-MM-ThihaNeural", "name": "Thiha (Burmese Male Anchor/Officer)", "gender": "Male", "locale": "my-MM", "archetype": "army_myanmar"},
