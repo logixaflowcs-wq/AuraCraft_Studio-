@@ -113,6 +113,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   currentModelName = '🌸 Sakura (Anime Idol)',
   lang = 'en',
   onModelChange,
+  onCanvasReady,
+  onModelLoadStateChange,
 }) => {
   const t = translations[lang] || translations.en;
   const mountRef = useRef<HTMLDivElement>(null);
