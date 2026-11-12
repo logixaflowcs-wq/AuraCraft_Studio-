@@ -34,6 +34,8 @@ services:
         sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
         sync: false
+      - key: TELEGRAM_WEBHOOK_URL
+        value: https://auracraft-studio-telegram-worker.auracraftstudio.workers.dev/webhook
       - key: TELEGRAM_IMPORT_ALLOWED_HOSTS
         sync: false
     rootDir: apps/web-platform/backend

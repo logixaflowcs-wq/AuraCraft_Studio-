@@ -462,7 +462,21 @@ async def telegram_bot_test():
         if not response.is_success or not payload.get("ok"):
             raise HTTPException(status_code=502, detail="Telegram bot check failed")
         bot = payload.get("result", {})
-        return {"ok": True, "username": bot.get("username"), "first_name": bot.get("first_name")}
+        webhook_info = {}
+        webhook_response = await client.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
+        if webhook_response.is_success:
+            webhook_payload = webhook_response.json()
+            if webhook_payload.get("ok"):
+                info = webhook_payload.get("result", {})
+                webhook_info = {
+                    "webhook_configured": bool(info.get("url")),
+                    "webhook_url_matches": info.get("url") == os.getenv("TELEGRAM_WEBHOOK_URL", "").strip() if os.getenv("TELEGRAM_WEBHOOK_URL", "").strip() else None,
+                    "pending_update_count": info.get("pending_update_count", 0),
+                    "last_error_date": info.get("last_error_date"),
+                    "last_error_message": info.get("last_error_message"),
+                    "max_connections": info.get("max_connections"),
+                }
+        return {"ok": True, "username": bot.get("username"), "first_name": bot.get("first_name"), **webhook_info}
     except HTTPException:
         raise
     except (httpx.HTTPError, ValueError):
@@ -774,10 +788,34 @@ async def register_telegram_commands_on_startup():
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(f"https://api.telegram.org/bot{token}/setMyCommands", json=payload)
-            if resp.status_code == 200:
-                print("[Telegram Startup] Successfully registered AuraCraft bot commands via setMyCommands")
-    except httpx.HTTPError:
-        logger.exception("Telegram command registration failed")
+            if resp.status_code == 200 and resp.json().get("ok"):
+                logger.info("Telegram bot commands registered")
+            else:
+                logger.warning("Telegram setMyCommands failed with HTTP %s", resp.status_code)
+
+            webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "").strip()
+            webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+            allowed_users = _allowed_telegram_user_ids()
+            if webhook_url and webhook_secret and allowed_users and TELEGRAM_GROUP_CHAT_ID and TELEGRAM_TOPIC_ID > 0:
+                webhook_response = await client.post(
+                    f"https://api.telegram.org/bot{token}/setWebhook",
+                    json={
+                        "url": webhook_url,
+                        "secret_token": webhook_secret,
+                        "allowed_updates": ["message"],
+                        "drop_pending_updates": False,
+                        "max_connections": 10,
+                    },
+                )
+                webhook_payload = webhook_response.json()
+                if not webhook_response.is_success or not webhook_payload.get("ok"):
+                    logger.error("Telegram webhook registration failed with HTTP %s", webhook_response.status_code)
+                else:
+                    logger.info("Telegram webhook registered successfully")
+            else:
+                logger.warning("Telegram webhook registration skipped: webhook URL, secret, group/topic, and user allowlist must all be configured")
+    except (httpx.HTTPError, ValueError):
+        logger.exception("Telegram startup registration failed")
 
 
 def _allowed_telegram_user_ids() -> set[str]:

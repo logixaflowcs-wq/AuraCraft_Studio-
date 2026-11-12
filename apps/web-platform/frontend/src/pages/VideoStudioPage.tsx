@@ -38,6 +38,10 @@ export const VideoStudioPage: React.FC = () => {
 
   const [generatedPlan, setGeneratedPlan] = useState<any | null>(null);
   const [exported, setExported] = useState(false);
+  const [isRenderingVideo, setIsRenderingVideo] = useState(false);
+  const [renderProgress, setRenderProgress] = useState(0);
+  const [renderedVideoUrl, setRenderedVideoUrl] = useState<string | null>(null);
+  const [videoRenderError, setVideoRenderError] = useState<string | null>(null);
 
   useEffect(() => {
     // FIX(audit-3-D): populate casting IDs from the backend rather than hardcoding a request ID.
@@ -138,6 +142,126 @@ export const VideoStudioPage: React.FC = () => {
     URL.revokeObjectURL(url);
     setExported(true);
     setTimeout(() => setExported(false), 3000);
+  };
+
+  const handleRenderVideo = async () => {
+    if (!scenes.length || isRenderingVideo) return;
+    if (!('MediaRecorder' in window) || !HTMLCanvasElement.prototype.captureStream) {
+      setVideoRenderError('ဤ browser တွင် WebM video rendering မပံ့ပိုးပါ။ Chrome သို့မဟုတ် Edge နောက်ဆုံးဗားရှင်းကို အသုံးပြုပါ။');
+      return;
+    }
+    setIsRenderingVideo(true);
+    setRenderProgress(0);
+    setVideoRenderError(null);
+    if (renderedVideoUrl) URL.revokeObjectURL(renderedVideoUrl);
+    setRenderedVideoUrl(null);
+
+    const canvas = document.createElement('canvas');
+    const width = aspectRatio === '9:16' ? 720 : 1280;
+    const height = aspectRatio === '9:16' ? 1280 : 720;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      setVideoRenderError('Canvas renderer ကို စတင်၍မရပါ။');
+      setIsRenderingVideo(false);
+      return;
+    }
+
+    const drawScene = (scene: typeof scenes[number], index: number, elapsed: number) => {
+      const progress = Math.min(1, elapsed / durationPerScene);
+      const gradient = ctx.createLinearGradient(0, 0, width, height);
+      gradient.addColorStop(0, '#10172b');
+      gradient.addColorStop(0.55, '#25154b');
+      gradient.addColorStop(1, '#071b2b');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = 'rgba(139, 92, 246, 0.12)';
+      ctx.beginPath();
+      ctx.arc(width * (0.82 - progress * 0.12), height * 0.18, Math.min(width, height) * 0.24, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#a78bfa';
+      ctx.font = '600 22px system-ui, sans-serif';
+      ctx.fillText('AURACRAFT STUDIO', width * 0.08, height * 0.1);
+      ctx.fillStyle = '#c4b5fd';
+      ctx.font = '500 18px system-ui, sans-serif';
+      ctx.fillText(`SCENE ${index + 1} / ${scenes.length}  •  ${scene.emotion.toUpperCase()}  •  CAMERA: ${scene.camera.toUpperCase()}`, width * 0.08, height * 0.16);
+
+      const titleSize = aspectRatio === '9:16' ? 34 : 42;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `700 ${titleSize}px system-ui, "Noto Sans Myanmar", sans-serif`;
+      ctx.textBaseline = 'top';
+      ctx.fillText(scene.title.slice(0, 48), width * 0.08, height * 0.31, width * 0.84);
+
+      const fontSize = aspectRatio === '9:16' ? 30 : 34;
+      ctx.font = `400 ${fontSize}px system-ui, "Noto Sans Myanmar", sans-serif`;
+      const maxWidth = width * 0.84;
+      const lines: string[] = [];
+      let line = '';
+      // Myanmar text often has no spaces between words, so wrap by Unicode code point.
+      for (const character of Array.from(scene.script)) {
+        const candidate = line + character;
+        if (line && ctx.measureText(candidate).width > maxWidth) {
+          lines.push(line);
+          line = character.trim() ? character : '';
+        } else line = candidate;
+      }
+      if (line) lines.push(line);
+      const visibleLines = lines.slice(0, aspectRatio === '9:16' ? 8 : 5);
+      ctx.fillStyle = '#e2e8f0';
+      visibleLines.forEach((text, lineIndex) => ctx.fillText(text, width * 0.08, height * 0.43 + lineIndex * (fontSize * 1.55), maxWidth));
+
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(width * 0.08, height * 0.88, width * 0.84, 6);
+      ctx.fillStyle = '#a78bfa';
+      ctx.fillRect(width * 0.08, height * 0.88, width * 0.84 * progress, 6);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '16px system-ui, sans-serif';
+      ctx.fillText('Storyboard export • Silent video • WebM', width * 0.08, height * 0.92);
+    };
+
+    const stream = canvas.captureStream(30);
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks: BlobPart[] = [];
+    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    const finished = new Promise<Blob>((resolve, reject) => {
+      recorder.onerror = () => reject(new Error('Video encoding failed.'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+    });
+
+    try {
+      recorder.start(250);
+      const frameMs = 1000 / 30;
+      const totalFrames = Math.max(1, Math.round(durationPerScene * 30));
+      for (let sceneIndex = 0; sceneIndex < scenes.length; sceneIndex += 1) {
+        for (let frame = 0; frame < totalFrames; frame += 1) {
+          drawScene(scenes[sceneIndex], sceneIndex, frame / 30);
+          setRenderProgress(Math.round(((sceneIndex * totalFrames + frame + 1) / (scenes.length * totalFrames)) * 100));
+          await new Promise((resolve) => window.setTimeout(resolve, frameMs));
+        }
+      }
+      recorder.stop();
+      const blob = await finished;
+      if (!blob.size) throw new Error('The browser produced an empty video file.');
+      setRenderedVideoUrl(URL.createObjectURL(blob));
+    } catch (error) {
+      if (recorder.state !== 'inactive') recorder.stop();
+      setVideoRenderError(error instanceof Error ? error.message : 'Video rendering failed.');
+    } finally {
+      stream.getTracks().forEach((track) => track.stop());
+      setIsRenderingVideo(false);
+    }
+  };
+
+  const handleDownloadVideo = () => {
+    if (!renderedVideoUrl) return;
+    const link = document.createElement('a');
+    link.href = renderedVideoUrl;
+    link.download = `auracraft_storyboard_${aspectRatio.replace(':', 'x')}.webm`;
+    link.click();
   };
 
   return (
@@ -329,6 +453,29 @@ export const VideoStudioPage: React.FC = () => {
                 )}
               </button>
             </div>
+          </div>
+
+          <div className="bg-[#111726]/80 border border-[#1f293d] rounded-2xl p-5 space-y-3">
+            <div>
+              <h3 className="text-sm font-bold text-white">Render actual storyboard video</h3>
+              <p className="text-xs text-slate-400 mt-1">Browser-side silent WebM export. This renders animated scene cards and dialogue captions; it does not render a 3D avatar or narration audio.</p>
+            </div>
+            <button
+              onClick={handleRenderVideo}
+              disabled={isRenderingVideo || !scenes.length}
+              className="w-full py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-2"
+            >
+              {isRenderingVideo ? <><Loader2 className="w-4 h-4 animate-spin" /> Rendering {renderProgress}%</> : <><Play className="w-4 h-4" /> Render WebM Video</>}
+            </button>
+            {videoRenderError && <p role="alert" className="text-xs text-rose-300">{videoRenderError}</p>}
+            {renderedVideoUrl && (
+              <div className="space-y-2">
+                <video controls playsInline src={renderedVideoUrl} className="w-full rounded-xl border border-[#23314f]" />
+                <button onClick={handleDownloadVideo} className="w-full py-2 rounded-xl bg-emerald-700/70 hover:bg-emerald-600 text-white text-xs font-semibold flex items-center justify-center gap-2">
+                  <Download className="w-4 h-4" /> Download rendered WebM
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Manifest JSON Preview */}
