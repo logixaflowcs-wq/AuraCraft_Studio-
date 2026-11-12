@@ -139,7 +139,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "ja-JP-KeitaNeural",
         "language": "ja-JP",
         "personality": "Determined, heroic, courageous young anime mech pilot fighting for humanity",
-        "vrm_model": "/models/sample_avatar_c.vrm",
+        "vrm_model": "/models/avatar_female_c.vrm",
         "default_emotion": "neutral",
         "avatar_color": "#38bdf8",
         "tags": ["anime", "shonen", "mecha", "hero", "japanese"]
@@ -152,7 +152,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "ja-JP-NanamiNeural",
         "language": "ja-JP",
         "personality": "Cheerful, energetic magical girl idol bringing hope and celestial light",
-        "vrm_model": "/models/sample_avatar_a.vrm",
+        "vrm_model": "/models/avatar_female_a.vrm",
         "default_emotion": "happy",
         "avatar_color": "#ec4899",
         "tags": ["anime", "magical-girl", "idol", "vtuber", "japanese"]
@@ -165,7 +165,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "ja-JP-KeitaNeural",
         "language": "ja-JP",
         "personality": "Calm, brooding master swordsman with supernatural shadow abilities",
-        "vrm_model": "/models/sample_avatar_b.vrm",
+        "vrm_model": "/avatar_human.vrm",
         "default_emotion": "angry",
         "avatar_color": "#a855f7",
         "tags": ["anime", "dark-fantasy", "swordsman", "antihero"]
@@ -180,7 +180,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "my-MM-ThihaNeural",
         "language": "my-MM",
         "personality": "Strategic, authoritative, disciplined high-ranking military commander with tactical acumen",
-        "vrm_model": "/models/sample_avatar_b.vrm",
+        "vrm_model": "/avatar_human.vrm",
         "default_emotion": "neutral",
         "avatar_color": "#84cc16",
         "tags": ["army", "military", "tactical", "burmese", "commander"]
@@ -193,7 +193,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "my-MM-ThihaNeural",
         "language": "my-MM",
         "personality": "Hardened combat veteran, fearless frontline squad leader ready for special ops missions",
-        "vrm_model": "/models/sample_avatar_b.vrm",
+        "vrm_model": "/avatar_human.vrm",
         "default_emotion": "angry",
         "avatar_color": "#eab308",
         "tags": ["army", "military", "specops", "burmese", "infantry"]
@@ -206,7 +206,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "en-US-GuyNeural",
         "language": "en-US",
         "personality": "Decisive, tactical airborne specialist delivering battlefield briefs and recon updates",
-        "vrm_model": "/models/sample_avatar_c.vrm",
+        "vrm_model": "/models/avatar_female_c.vrm",
         "default_emotion": "neutral",
         "avatar_color": "#10b981",
         "tags": ["army", "military", "airborne", "recon", "english"]
@@ -221,7 +221,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "my-MM-NilarNeural",
         "language": "my-MM",
         "personality": "Gracious, elegant Burmese cultural ambassador with traditional thanakha artistry",
-        "vrm_model": "/models/sample_avatar_a.vrm",
+        "vrm_model": "/models/avatar_female_a.vrm",
         "default_emotion": "happy",
         "avatar_color": "#f59e0b",
         "tags": ["myanmar", "traditional", "burmese", "cultural", "female"]
@@ -234,7 +234,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "my-MM-ThihaNeural",
         "language": "my-MM",
         "personality": "Eloquent classical royal court narrator and dramatic performing artist with rich historical wisdom",
-        "vrm_model": "/models/sample_avatar_b.vrm",
+        "vrm_model": "/avatar_human.vrm",
         "default_emotion": "neutral",
         "avatar_color": "#d97706",
         "tags": ["myanmar", "traditional", "royal-court", "burmese", "male"]
@@ -247,7 +247,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "my-MM-NilarNeural",
         "language": "my-MM",
         "personality": "Warm, authentic Bagan heritage storyteller sharing ancient folklore and cultural traditions",
-        "vrm_model": "/models/sample_avatar_a.vrm",
+        "vrm_model": "/models/avatar_female_a.vrm",
         "default_emotion": "happy",
         "avatar_color": "#fb923c",
         "tags": ["myanmar", "traditional", "bagan", "female"]
@@ -262,7 +262,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "en-US-JennyNeural",
         "language": "en-US",
         "personality": "Energetic, witty, tech-savvy cyberpunk virtual streamer and gaming creator",
-        "vrm_model": "/models/sample_avatar_c.vrm",
+        "vrm_model": "/models/avatar_female_c.vrm",
         "default_emotion": "surprised",
         "avatar_color": "#06b6d4",
         "tags": ["streamer", "vtuber", "cyberpunk", "english"]
@@ -275,7 +275,7 @@ DEFAULT_CHARACTERS = [
         "voice_id": "en-US-AriaNeural",
         "language": "en-US",
         "personality": "Chill, atmospheric music host and digital artist curating creative beats and stories",
-        "vrm_model": "/models/sample_avatar_a.vrm",
+        "vrm_model": "/models/avatar_female_a.vrm",
         "default_emotion": "happy",
         "avatar_color": "#8b5cf6",
         "tags": ["streamer", "music", "creative", "lofi"]
@@ -292,7 +292,7 @@ class CharacterRecord(BaseModel):
     voice_id: str = "my-MM-NilarNeural"
     language: str = "my-MM"
     personality: str = "Enthusiastic and polite"
-    vrm_model: str = "/models/sample_avatar_a.vrm"
+    vrm_model: str = "/models/avatar_female_a.vrm"
     default_emotion: str = "neutral"
     avatar_color: str = "#8b5cf6"
     tags: list[str] = Field(default_factory=list)
@@ -316,6 +316,32 @@ def _atomic_write_characters(data: list[dict[str, Any]]) -> None:
             os.unlink(temp_path)
 
 
+LEGACY_VRM_MODEL_PATHS = {
+    "/models/sample_avatar_a.vrm": "/models/avatar_female_a.vrm",
+    "/models/sample_avatar_b.vrm": "/avatar_human.vrm",
+    "/models/sample_avatar_c.vrm": "/models/avatar_female_c.vrm",
+}
+
+
+def _normalize_vrm_model_path(path: str | None) -> str:
+    candidate = path or "/models/avatar_female_a.vrm"
+    return LEGACY_VRM_MODEL_PATHS.get(candidate, candidate)
+
+
+def _normalize_character_vrm_paths(data: Any) -> Any:
+    if not isinstance(data, list):
+        return data
+    normalized: list[Any] = []
+    for item in data:
+        if isinstance(item, dict):
+            record = dict(item)
+            record["vrm_model"] = _normalize_vrm_model_path(record.get("vrm_model"))
+            normalized.append(record)
+        else:
+            normalized.append(item)
+    return normalized
+
+
 def load_characters() -> list[dict[str, Any]]:
     # FIX(free-tier-1): use Neon Postgres when configured so Render Free restarts do not erase characters.
     if database_enabled():
@@ -324,7 +350,7 @@ def load_characters() -> list[dict[str, Any]]:
             write_state("characters", DEFAULT_CHARACTERS)
             return DEFAULT_CHARACTERS
         try:
-            return [item.model_dump(mode="json") for item in _character_records.validate_python(raw_data)]
+            return [item.model_dump(mode="json") for item in _character_records.validate_python(_normalize_character_vrm_paths(raw_data))]
         except (ValidationError, TypeError):
             backup_key = f"characters:corrupt:{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}"
             write_state(backup_key, raw_data)
@@ -384,7 +410,7 @@ class CharacterCreate(BaseModel):
     voice_id: str = Field(default="my-MM-NilarNeural")
     language: str = Field(default="my-MM")
     personality: str = Field(default="Enthusiastic and polite")
-    vrm_model: str = Field(default="/models/sample_avatar_a.vrm")
+    vrm_model: str = Field(default="/models/avatar_female_a.vrm")
     default_emotion: str = Field(default="neutral")
     avatar_color: str | None = Field(default="#8b5cf6")
     tags: list[str] = Field(default_factory=list)
@@ -415,7 +441,7 @@ class ManualPersonaPack(BaseModel):
     role: str = Field(default="Virtual Actor", max_length=100)
     style: str = Field(default="custom", max_length=50)
     voice_binding: PersonaVoiceBinding
-    vrm_model_path: str = Field(default="/models/sample_avatar_a.vrm", max_length=500)
+    vrm_model_path: str = Field(default="/models/avatar_female_a.vrm", max_length=500)
     avatar_color: str = Field(default="#8b5cf6", max_length=20)
     default_emotion: str = Field(default="neutral", max_length=40)
     # FIX(free-tier-4): preserve Narrativ Forge blendshape mappings on import/export round trips.
@@ -1240,7 +1266,7 @@ def create_character(payload: CharacterCreate, _: None = Depends(require_auth)):
         "voice_id": payload.voice_id,
         "language": payload.language,
         "personality": payload.personality,
-        "vrm_model": payload.vrm_model,
+        "vrm_model": _normalize_vrm_model_path(payload.vrm_model),
         "default_emotion": payload.default_emotion,
         "avatar_color": payload.avatar_color or "#8b5cf6",
         "tags": payload.tags or [payload.style, "avatar-studio"]
@@ -1269,7 +1295,7 @@ def _import_persona_pack(pack: ManualPersonaPack, chars: list[dict[str, Any]]) -
         "voice_id": pack.voice_binding.voice_id.strip(),
         "language": pack.voice_binding.language.strip(),
         "personality": pack.character_meta.personality_prompt.strip(),
-        "vrm_model": pack.vrm_model_path,
+        "vrm_model": _normalize_vrm_model_path(pack.vrm_model_path),
         "default_emotion": pack.default_emotion.strip(),
         "avatar_color": pack.avatar_color.strip(),
         "expression_map": pack.expression_map,
