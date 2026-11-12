@@ -845,36 +845,44 @@ def _allowed_telegram_user_ids() -> set[str]:
 @app.post("/api/telegram/webhook")
 async def telegram_webhook(
     request: Request,
-    x_telegram_bot_api_secret_token: str | None = Header(None)
+    authorization: str | None = Header(None),
+    x_auracraft_worker_verified: str | None = Header(None),
+    x_telegram_bot_api_secret_token: str | None = Header(None),
 ):
-    """AuraCraft Telegram Webhook (Strictly Topic 215 Scoped)."""
-    # 1. Require Telegram's webhook secret; missing secrets must never be accepted.
-    if not TELEGRAM_WEBHOOK_SECRET:
-        raise HTTPException(status_code=503, detail="Telegram webhook is not configured")
-    if not x_telegram_bot_api_secret_token or not hmac.compare_digest(x_telegram_bot_api_secret_token, TELEGRAM_WEBHOOK_SECRET):
-        raise HTTPException(status_code=401, detail="Invalid Telegram secret token")
+    """Handle Telegram updates only after authenticating the Cloudflare edge gateway."""
+    expected_api_token = os.getenv("API_AUTH_TOKEN", "").strip()
+    scheme, _, supplied_token = (authorization or "").partition(" ")
+    worker_verified = bool(
+        expected_api_token
+        and scheme.lower() == "bearer"
+        and supplied_token
+        and hmac.compare_digest(supplied_token, expected_api_token)
+        and x_auracraft_worker_verified == "true"
+    )
+    if not worker_verified:
+        if not TELEGRAM_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="Telegram webhook is not configured")
+        if not x_telegram_bot_api_secret_token or not hmac.compare_digest(x_telegram_bot_api_secret_token, TELEGRAM_WEBHOOK_SECRET):
+            raise HTTPException(status_code=401, detail="Invalid Telegram secret token")
 
     body = await request.json()
     message = body.get("message", {})
     if not message:
         return {"ok": True, "ignored": "not_a_message"}
 
-    # 2. Strict Topic 215 Enforcement (Fail-Closed)
     topic_id = message.get("message_thread_id")
-    if topic_id != TELEGRAM_TOPIC_ID:
-        return {"ok": True, "ignored": f"unauthorized_topic_{topic_id}"}
-
-    if str(message.get("chat", {}).get("id")) != TELEGRAM_GROUP_CHAT_ID:
-        return {"ok": True, "ignored": "unauthorized_chat"}
-
-    allowed_users = _allowed_telegram_user_ids()
-    user_id = message.get("from", {}).get("id")
-    if _production_mode() and not allowed_users:
-        raise HTTPException(status_code=503, detail="Telegram user allowlist is not configured")
-    # FIX(audit-1-H): compare Telegram allowlisted user IDs without early-exit string equality.
-    user_id_text = str(user_id)
-    if allowed_users and not any(hmac.compare_digest(user_id_text, allowed_id) for allowed_id in allowed_users):
-        return {"ok": True, "ignored": "unauthorized_user"}
+    if not worker_verified:
+        # Local/non-edge fallback remains fail-closed; production verification is performed by Worker.
+        if topic_id != TELEGRAM_TOPIC_ID:
+            return {"ok": True, "ignored": f"unauthorized_topic_{topic_id}"}
+        if str(message.get("chat", {}).get("id")) != TELEGRAM_GROUP_CHAT_ID:
+            return {"ok": True, "ignored": "unauthorized_chat"}
+        allowed_users = _allowed_telegram_user_ids()
+        user_id_text = str(message.get("from", {}).get("id"))
+        if _production_mode() and not allowed_users:
+            raise HTTPException(status_code=503, detail="Telegram user allowlist is not configured")
+        if allowed_users and not any(hmac.compare_digest(user_id_text, allowed_id) for allowed_id in allowed_users):
+            return {"ok": True, "ignored": "unauthorized_user"}
 
     text = message.get("text", "").strip()
     command = text.split()[0].lower() if text else ""
