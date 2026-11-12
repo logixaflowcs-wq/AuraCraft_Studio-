@@ -36,6 +36,48 @@ export default {
       return Response.json({ status: "healthy", service: "AuraCraft Studio Edge Gateway" });
     }
 
+    // Backend-only Telegram Bot API proxy: the bot token stays in this Worker secret store.
+    if (url.pathname.startsWith("/telegram-api/")) {
+      if (!["GET", "POST"].includes(request.method)) return new Response("Method not allowed", { status: 405 });
+      if (!env.API_AUTH_TOKEN || !constantTimeEqual(request.headers.get("Authorization"), `Bearer ${env.API_AUTH_TOKEN}`)) {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }
+      if (!env.TELEGRAM_BOT_TOKEN) return Response.json({ error: "telegram_bot_not_configured" }, { status: 503 });
+      const method = url.pathname.slice("/telegram-api/".length);
+      const allowedMethods = new Set(["getMe", "getWebhookInfo", "setMyCommands", "setWebhook", "sendMessage", "sendAudio", "sendDocument"]);
+      if (!allowedMethods.has(method)) return Response.json({ error: "telegram_method_not_allowed" }, { status: 404 });
+
+      const headers = new Headers(request.headers);
+      headers.delete("Authorization");
+      headers.delete("Origin");
+      headers.delete("Host");
+      headers.delete("Content-Length");
+      let body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
+      if (method === "setWebhook") {
+        if (!env.TELEGRAM_WEBHOOK_SECRET) return Response.json({ error: "webhook_not_configured" }, { status: 503 });
+        try {
+          const payload = await request.json();
+          payload.secret_token = env.TELEGRAM_WEBHOOK_SECRET;
+          body = JSON.stringify(payload);
+          headers.set("Content-Type", "application/json");
+        } catch {
+          return Response.json({ error: "invalid_json" }, { status: 400 });
+        }
+      }
+      try {
+        const target = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
+        const response = await fetch(target, { method: request.method, headers, body, redirect: "manual" });
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: { "Content-Type": response.headers.get("Content-Type") || "application/json" },
+        });
+      } catch (error) {
+        console.error("Telegram Bot API proxy failed", error);
+        return Response.json({ error: "telegram_proxy_failed" }, { status: 502 });
+      }
+    }
+
     if (url.pathname === "/webhook") {
       if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
       try {
@@ -54,21 +96,42 @@ export default {
         if (new TextEncoder().encode(rawBody).byteLength > 64 * 1024) {
           return Response.json({ error: "payload_too_large" }, { status: 413 });
         }
+        let update;
         try {
-          JSON.parse(rawBody);
+          update = JSON.parse(rawBody);
         } catch {
           return Response.json({ error: "invalid_json" }, { status: 400 });
         }
 
-        // FIX(audit-2-B): the backend owns all Telegram commands and bot credentials.
-        if (!env.BACKEND_API_URL) return Response.json({ error: "backend_not_configured" }, { status: 503 });
+        const message = update?.message;
+        if (!message) return Response.json({ ok: true, ignored: "not_a_message" });
+        const allowedUsers = (env.TELEGRAM_ALLOWED_USER_IDS || "").split(",").map((value) => value.trim()).filter(Boolean);
+        const expectedChat = (env.TELEGRAM_GROUP_CHAT_ID || "").trim();
+        const expectedTopic = Number(env.TELEGRAM_TOPIC_ID || 0);
+        if (!expectedChat || !expectedTopic || !allowedUsers.length) {
+          return Response.json({ error: "telegram_access_policy_not_configured" }, { status: 503 });
+        }
+        if (String(message.chat?.id ?? "") !== expectedChat) {
+          return Response.json({ ok: true, ignored: "unauthorized_chat" });
+        }
+        if (Number(message.message_thread_id || 0) !== expectedTopic) {
+          return Response.json({ ok: true, ignored: "unauthorized_topic" });
+        }
+        const userId = String(message.from?.id ?? "");
+        if (!allowedUsers.some((allowedId) => constantTimeEqual(userId, allowedId))) {
+          return Response.json({ ok: true, ignored: "unauthorized_user" });
+        }
+
+        // Only this Worker can attest that the Telegram secret, chat, topic and user checks passed.
+        if (!env.BACKEND_API_URL || !env.API_AUTH_TOKEN) return Response.json({ error: "backend_not_configured" }, { status: 503 });
         const backend = new URL("/api/telegram/webhook", env.BACKEND_API_URL);
         if (backend.protocol !== "https:") return Response.json({ error: "backend_not_configured" }, { status: 503 });
         const response = await fetch(backend.toString(), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Telegram-Bot-Api-Secret-Token": providedSecret,
+            "Authorization": `Bearer ${env.API_AUTH_TOKEN}`,
+            "X-AuraCraft-Worker-Verified": "true",
           },
           body: rawBody,
         });
