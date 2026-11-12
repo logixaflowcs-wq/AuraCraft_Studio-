@@ -53,6 +53,7 @@ export const VideoStudioPage: React.FC = () => {
   const [renderedVideoUrl, setRenderedVideoUrl] = useState<string | null>(null);
   const [renderedVideoMimeType, setRenderedVideoMimeType] = useState<string | null>(null);
   const [videoRenderError, setVideoRenderError] = useState<string | null>(null);
+  const [videoRenderNotice, setVideoRenderNotice] = useState<string | null>(null);
 
   useEffect(() => {
     // FIX(audit-3-D): populate casting IDs from the backend rather than hardcoding a request ID.
@@ -207,6 +208,7 @@ export const VideoStudioPage: React.FC = () => {
     setIsRenderingVideo(true);
     setRenderProgress(0);
     setVideoRenderError(null);
+    setVideoRenderNotice(null);
     if (renderedVideoUrl) URL.revokeObjectURL(renderedVideoUrl);
     setRenderedVideoUrl(null);
     setRenderedVideoMimeType(null);
@@ -223,6 +225,7 @@ export const VideoStudioPage: React.FC = () => {
       return;
     }
 
+    let avatarCanvas: HTMLCanvasElement | null = null;
     const audioContext = new AudioContext();
     let canvasStream: MediaStream | null = null;
     let combinedStream: MediaStream | null = null;
@@ -230,16 +233,22 @@ export const VideoStudioPage: React.FC = () => {
 
     const drawScene = (scene: typeof scenes[number], index: number, elapsed: number, sceneDuration: number) => {
       const progress = Math.min(1, elapsed / sceneDuration);
-      const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, '#10172b');
-      gradient.addColorStop(0.55, '#25154b');
-      gradient.addColorStop(1, '#071b2b');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-      ctx.fillStyle = 'rgba(139, 92, 246, 0.12)';
-      ctx.beginPath();
-      ctx.arc(width * (0.82 - progress * 0.12), height * 0.18, Math.min(width, height) * 0.24, 0, Math.PI * 2);
-      ctx.fill();
+      if (avatarCanvas) {
+        ctx.drawImage(avatarCanvas, 0, 0, width, height);
+        ctx.fillStyle = 'rgba(7, 11, 20, 0.28)';
+        ctx.fillRect(0, 0, width, height);
+      } else {
+        const gradient = ctx.createLinearGradient(0, 0, width, height);
+        gradient.addColorStop(0, '#10172b');
+        gradient.addColorStop(0.55, '#25154b');
+        gradient.addColorStop(1, '#071b2b');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = 'rgba(139, 92, 246, 0.12)';
+        ctx.beginPath();
+        ctx.arc(width * (0.82 - progress * 0.12), height * 0.18, Math.min(width, height) * 0.24, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.fillStyle = '#a78bfa';
       ctx.font = '600 22px system-ui, sans-serif';
       ctx.fillText('AURACRAFT STUDIO', width * 0.08, height * 0.1);
@@ -281,6 +290,10 @@ export const VideoStudioPage: React.FC = () => {
 
     try {
       await audioContext.resume();
+      avatarCanvas = await waitForAvatarStage();
+      if (avatarModelStatusRef.current === 'procedural') {
+        setVideoRenderNotice('VRM model မဖွင့်နိုင်သောကြောင့် built-in procedural 3D avatar ကို အသုံးပြုထားပါသည်။');
+      }
       const audioBuffers: AudioBuffer[] = [];
       for (let index = 0; index < scenes.length; index += 1) {
         const response = await fetch(API_ENDPOINTS.tts, {
@@ -343,6 +356,8 @@ export const VideoStudioPage: React.FC = () => {
       const totalDuration = audioBuffers.reduce((sum, buffer) => sum + buffer.duration, 0);
       let renderedSeconds = 0;
       for (let sceneIndex = 0; sceneIndex < scenes.length; sceneIndex += 1) {
+        setAvatarEmotion(scenes[sceneIndex].emotion);
+        setIsAvatarSpeaking(true);
         const sceneDuration = audioBuffers[sceneIndex].duration;
         const totalFrames = Math.max(1, Math.ceil(sceneDuration * 30));
         for (let frame = 0; frame < totalFrames; frame += 1) {
@@ -351,6 +366,7 @@ export const VideoStudioPage: React.FC = () => {
           await new Promise((resolve) => window.setTimeout(resolve, frameMs));
         }
         renderedSeconds += sceneDuration;
+        setIsAvatarSpeaking(false);
       }
       recorder.stop();
       const blob = await finished;
@@ -365,6 +381,12 @@ export const VideoStudioPage: React.FC = () => {
       canvasStream?.getTracks().forEach((track) => track.stop());
       combinedStream?.getTracks().forEach((track) => track.stop());
       await audioContext.close().catch(() => undefined);
+      setIsAvatarSpeaking(false);
+      setShowVideoStage(false);
+      avatarCanvasRef.current = null;
+      avatarModelStatusRef.current = 'idle';
+      setAvatarModelStatus('idle');
+      resolveAvatarStageRef.current = null;
       setIsRenderingVideo(false);
     }
   };
@@ -380,6 +402,20 @@ export const VideoStudioPage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0a0d14] text-slate-100 overflow-y-auto p-6 space-y-6">
+      {showVideoStage && (
+        <div aria-hidden="true" style={{ position: 'fixed', left: '-2200px', top: 0, width: aspectRatio === '9:16' ? 720 : 1280, height: aspectRatio === '9:16' ? 1280 : 720, opacity: 0, pointerEvents: 'none', zIndex: -1 }}>
+          <Viewport3D
+            key={aspectRatio}
+            currentEmotion={avatarEmotion}
+            bgMode="cyber"
+            isSpeaking={isAvatarSpeaking}
+            currentModelUrl={selectedModelUrl}
+            currentModelName={characterName}
+            onCanvasReady={handleAvatarCanvasReady}
+            onModelLoadStateChange={handleAvatarModelLoadStateChange}
+          />
+        </div>
+      )}
       {/* Header */}
       <div className="border-b border-[#1f293d] pb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -524,6 +560,7 @@ export const VideoStudioPage: React.FC = () => {
                     setSelectedCharacterId(e.target.value);
                     if (selected) {
                       setCharacterName(selected.name);
+                      setSelectedModelUrl(selected.vrm_model || '/models/avatar_female_c.vrm');
                       if (selected.voice_id) setVoiceId(selected.voice_id);
                     }
                   }}
@@ -587,7 +624,7 @@ export const VideoStudioPage: React.FC = () => {
           <div className="bg-[#111726]/80 border border-[#1f293d] rounded-2xl p-5 space-y-3">
             <div>
               <h3 className="text-sm font-bold text-white">Render narrated storyboard video</h3>
-              <p className="text-xs text-slate-400 mt-1">Browser-side narrated export: MP4 when your browser supports it, otherwise WebM. It renders animated scene cards and captions; 3D avatar animation is not included.</p>
+              <p className="text-xs text-slate-400 mt-1">Browser-side 3D avatar video with Edge-TTS narration. MP4 is used when your browser supports it; otherwise WebM is used. A procedural 3D fallback appears if a selected VRM asset cannot load.</p>
             </div>
             <button
               onClick={handleRenderVideo}
@@ -597,6 +634,7 @@ export const VideoStudioPage: React.FC = () => {
               {isRenderingVideo ? <><Loader2 className="w-4 h-4 animate-spin" /> Rendering {renderProgress}%</> : <><Play className="w-4 h-4" /> Render Video (MP4 / WebM)</>}
             </button>
             {videoRenderError && <p role="alert" className="text-xs text-rose-300">{videoRenderError}</p>}
+            {videoRenderNotice && <p className="text-xs text-amber-300">{videoRenderNotice}</p>}
             {renderedVideoUrl && (
               <div className="space-y-2">
                 <video controls playsInline src={renderedVideoUrl} className="w-full rounded-xl border border-[#23314f]" />
