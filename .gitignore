@@ -67,3 +67,8 @@ apps/backend-service/data/narrativ_exports/
 Thumbs.db
 desktop.ini
 ehthumbs.db
+
+# Nexus Suite Inspector - never commit these
+inspector_credentials.env
+auth_sessions/
+*.session.json

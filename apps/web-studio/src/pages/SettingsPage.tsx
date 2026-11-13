@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { clearAllLocalData } from '../db/database';
+import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import { Settings, Server, CheckCircle2, AlertCircle, RefreshCw, Database, Trash2, Cpu, Globe, Send, ShieldCheck, Loader2 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
@@ -10,11 +12,12 @@ export const SettingsPage: React.FC = () => {
   const checkHealth = async () => {
     setApiStatus('checking');
     try {
-      const res = await fetch((import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/health', { method: 'GET' });
+      const res = await fetch(API_BASE_URL + '/ready', { method: 'GET' });
       if (res.ok) setApiStatus('online');
       else setApiStatus('offline');
     } catch {
-      setApiStatus('online'); // Server is responding on port 8010
+      // FIX(audit-3-G): a failed readiness request is offline, never a synthetic success.
+      setApiStatus('offline');
     }
   };
 
@@ -24,31 +27,32 @@ export const SettingsPage: React.FC = () => {
 
   const handleTestTelegram = async () => {
     setIsTestingTelegram(true);
-    setTelegramStatus('Pinging Telegram Bridge...');
+    setTelegramStatus('Checking Telegram bot credentials...');
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8010';
-      const res = await fetch(`${baseUrl}/health`);
-      if (res.ok) {
-        const data = await res.json();
-        setTelegramStatus(`✅ Bridge Active: Topic ${data.telegram_topic || 215} (Chat ${data.telegram_chat_id || '-1003992125718'})`);
-      } else {
-        setTelegramStatus('⚠️ Backend online, checking bot credentials');
-      }
+      // FIX(audit-3-G): call the backend getMe proxy; /health cannot verify bot credentials.
+      const res = await fetch(API_BASE_URL + '/api/telegram/test');
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error('Telegram bot check failed');
+      setTelegramStatus('✅ Bot connected: @' + (data.username || 'unknown'));
     } catch {
-      setTelegramStatus('⚡ Local fallback mode (Topic 215 active)');
+      setTelegramStatus('❌ Telegram bot check failed. Verify backend bot configuration.');
     } finally {
       setIsTestingTelegram(false);
     }
   };
 
-  const handleClearCache = () => {
+  const handleClearCache = async () => {
     if (window.confirm('Clear all custom characters and reset to default factory presets?')) {
-      localStorage.removeItem('auracraft_custom_chars');
-      localStorage.removeItem('auracraft_deleted_chars');
-      localStorage.removeItem('auracraft_custom_characters');
-      setCleared(true);
-      setTimeout(() => setCleared(false), 2500);
-      window.location.reload();
+      try {
+        // FIX(audit-3-A): clear every Dexie table as well as localStorage.
+        await clearAllLocalData();
+        localStorage.clear();
+        setCleared(true);
+        window.location.reload();
+      } catch {
+        setCleared(false);
+        setTelegramStatus('❌ Could not clear local database. Close other tabs and retry.');
+      }
     }
   };
 
@@ -92,11 +96,15 @@ export const SettingsPage: React.FC = () => {
             <div className="bg-[#0a0d14] p-3.5 rounded-xl border border-[#23314f] flex items-center justify-between">
               <div>
                 <strong className="text-slate-200 block">AuraCraft Backend API</strong>
-                <span className="text-[11px] text-slate-500 font-mono">http://localhost:8010</span>
+                <span className="text-[11px] text-slate-500 font-mono break-all">{API_BASE_URL}</span>
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800/40">
-                <CheckCircle2 className="w-3 h-3" />
-                Active (Port 8010)
+              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${
+                apiStatus === 'online' ? 'bg-emerald-950 text-emerald-400 border-emerald-800/40' :
+                apiStatus === 'offline' ? 'bg-rose-950 text-rose-300 border-rose-800/40' :
+                'bg-slate-800 text-slate-300 border-slate-700'
+              }`}>
+                {apiStatus === 'online' ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                {apiStatus === 'online' ? 'Online' : apiStatus === 'offline' ? 'Offline' : 'Checking'}
               </span>
             </div>
 
@@ -129,7 +137,7 @@ export const SettingsPage: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <strong className="text-slate-200 block">The Nexus Hub Telegram Alerts</strong>
-                  <span className="text-[11px] text-slate-500 font-mono">@AuraCraftNexusBot &bull; Topic 215</span>
+                  <span className="text-[11px] text-slate-500 font-mono">Configured by administrator</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -168,16 +176,16 @@ export const SettingsPage: React.FC = () => {
 
             <div className="bg-[#0a0d14] p-4 rounded-xl border border-[#23314f] space-y-2 text-xs">
               <div className="flex justify-between text-slate-400">
-                <span>Storage Key:</span>
-                <span className="text-purple-300 font-mono">auracraft_custom_chars</span>
+                <span>Character files:</span>
+                <span className="text-emerald-400 font-semibold">Browser IndexedDB</span>
               </div>
               <div className="flex justify-between text-slate-400">
-                <span>Persistence Mode:</span>
-                <span className="text-emerald-400 font-semibold">Browser LocalStorage</span>
+                <span>Preferences:</span>
+                <span className="text-slate-300 font-semibold">Browser storage</span>
               </div>
               <div className="flex justify-between text-slate-400">
-                <span>Microservice Boundary:</span>
-                <span className="text-cyan-400 font-semibold">Decoupled Microservice</span>
+                <span>Scope:</span>
+                <span className="text-cyan-400 font-semibold">This browser only</span>
               </div>
             </div>
           </div>

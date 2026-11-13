@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, Mic, Play, Loader2, Download, Sliders, Sparkles, MessageSquare } from 'lucide-react';
 import { lipSync } from '../audio/lipSyncAnalyzer';
 import { translations, type Language } from '../utils/i18n';
+import { API_ENDPOINTS } from '../config/api';
 
 interface VoiceSelectorProps {
   currentVoice: string;
@@ -22,6 +23,13 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
   const [pitch, setPitch] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [lastAudioUrl, setLastAudioUrl] = useState<string | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => () => {
+    // FIX(audit-3-B): disconnect audio nodes and revoke the current playback URL on unmount.
+    lipSync.dispose();
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+  }, []);
 
   const voices = [
     { id: 'my-MM-NilarNeural', name: 'Nilar (နီလာ)', lang: 'Myanmar ♀', flag: '🇲🇲', desc: 'Natural Female' },
@@ -32,6 +40,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
     { id: 'en-US-GuyNeural', name: 'Guy Tactical', lang: 'English ♂', flag: '🇺🇸', desc: 'Recon Officer' },
     { id: 'zh-CN-XiaoxiaoNeural', name: 'Xiaoxiao (晓晓)', lang: 'Chinese ♀', flag: '🇨🇳', desc: 'Expressive' },
     { id: 'ko-KR-SunHiNeural', name: 'SunHi (선희)', lang: 'Korean ♀', flag: '🇰🇷', desc: 'K-Drama Heroine' },
+    { id: 'en-US-AriaNeural', name: 'Aria Synth', lang: 'English ♀', flag: '🇺🇸', desc: 'Expressive Narrator' },
   ];
 
   const SAMPLE_SCRIPTS = [
@@ -46,7 +55,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
     setLoading(true);
 
     try {
-      const backendUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8010') + '/api/tts/synthesize';
+      const backendUrl = API_ENDPOINTS.tts;
       const rateStr = rate >= 1.0 ? `+${Math.round((rate - 1.0) * 100)}%` : `-${Math.round((1.0 - rate) * 100)}%`;
       const pitchStr = pitch >= 0 ? `+${pitch}Hz` : `${pitch}Hz`;
 
@@ -64,6 +73,8 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
       if (res.ok) {
         const blob = await res.blob();
         const audioUrl = URL.createObjectURL(blob);
+        if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = audioUrl;
         setLastAudioUrl(audioUrl);
         const audio = new Audio(audioUrl);
 
@@ -71,8 +82,8 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
         lipSync.resume();
 
         onSpeakingStateChange(true);
-        audio.onended = () => onSpeakingStateChange(false);
-        audio.onerror = () => onSpeakingStateChange(false);
+        audio.onended = () => { lipSync.dispose(); onSpeakingStateChange(false); };
+        audio.onerror = () => { lipSync.dispose(); onSpeakingStateChange(false); };
         await audio.play();
       } else {
         // Fallback

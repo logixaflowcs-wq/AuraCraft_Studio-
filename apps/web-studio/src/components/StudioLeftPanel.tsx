@@ -17,6 +17,7 @@ export interface StudioCharacter {
   defaultVoice: string;
   defaultEmotion: string;
   isCustom?: boolean;
+  blobId?: string;
 }
 
 export const ALL_STUDIO_CHARACTERS: StudioCharacter[] = [
@@ -256,7 +257,7 @@ export const StudioLeftPanel: React.FC<StudioLeftPanelProps> = ({
   });
 
   return (
-    <aside className="w-72 border-r border-[#1f293d] bg-[#0c101c]/95 flex flex-col h-full shadow-2xl z-30 flex-shrink-0 select-none">
+    <aside className="w-full xl:w-72 h-48 xl:h-full border-b xl:border-b-0 xl:border-r border-[#1f293d] bg-[#0c101c]/95 flex flex-col shadow-2xl z-30 flex-shrink-0 select-none">
       {/* Hidden File Inputs */}
       <input
         ref={photoInputRef}
@@ -335,7 +336,7 @@ export const StudioLeftPanel: React.FC<StudioLeftPanelProps> = ({
         <div className="flex items-center justify-between px-1 pb-1 border-b border-[#1f293d]/40 mb-1">
           <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
             <Layers className="w-3 h-3 text-purple-400" />
-            <span>{isMyanmar ? `ဇာတ်ကောင်စာရင်း (${filteredCharacters.length})` : `Characters (${filteredCharacters.length})`}</span>
+            <span>{isMyanmar ? `စတေ့ချ် Avatar (${filteredCharacters.length})` : `Stage Avatars (${filteredCharacters.length})`}</span>
           </span>
 
           {onResetAllPresets && deletedCharacterIds && deletedCharacterIds.length > 0 && (

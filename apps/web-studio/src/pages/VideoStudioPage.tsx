@@ -1,30 +1,44 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Clapperboard, Video, Plus, Trash2, Download, Check, Sparkles, Smartphone, Monitor, Clock, Play, Loader2 } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
+import { createSceneId } from './videoStudioUtils';
+import { Viewport3D } from '../components/Viewport3D';
 
 export const VideoStudioPage: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<'9:16' | '16:9'>('9:16');
   const [characterName, setCharacterName] = useState('Shinji Kazama (シンジ)');
+  const [selectedCharacterId, setSelectedCharacterId] = useState('char_anime_shinji');
+  const [availableCharacters, setAvailableCharacters] = useState<Array<{ id: string; name: string; voice_id?: string; vrm_model?: string }>>([]);
+  const [selectedModelUrl, setSelectedModelUrl] = useState('/models/avatar_female_c.vrm');
+  const [showVideoStage, setShowVideoStage] = useState(false);
+  const [isAvatarSpeaking, setIsAvatarSpeaking] = useState(false);
+  const [avatarEmotion, setAvatarEmotion] = useState('neutral');
+  const [avatarModelStatus, setAvatarModelStatus] = useState<'idle' | 'loading' | 'vrm' | 'procedural'>('idle');
+  const avatarCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const avatarModelStatusRef = useRef<'idle' | 'loading' | 'vrm' | 'procedural'>('idle');
+  const resolveAvatarStageRef = useRef<((canvas: HTMLCanvasElement) => void) | null>(null);
+  const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [voiceId, setVoiceId] = useState('my-MM-NilarNeural');
   const [durationPerScene, setDurationPerScene] = useState(6);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
-  const [scenes, setScenes] = useState<Array<{ id: number; title: string; script: string; emotion: string; camera: string }>>([
+  const [scenes, setScenes] = useState<Array<{ id: string; title: string; script: string; emotion: string; camera: string }>>([
     {
-      id: 1,
+      id: 'scene-1',
       title: 'Scene 1: Introduction (မိတ်ဆက်)',
       script: 'မင်္ဂလာပါ! ကျွန်တော်တို့ AuraCraft Studio ရဲ့ 3D Persona စနစ်သစ်ကို ကြည့်ရှုဖို့ ကြိုဆိုပါတယ်။',
       emotion: 'happy',
       camera: 'bust',
     },
     {
-      id: 2,
+      id: 'scene-2',
       title: 'Scene 2: Core Briefing (အဓိကအချက်)',
       script: 'ဒီစနစ်က 3D VRM Humanoid အနေနဲ့ရော၊ 2D Portrait အနေနဲ့ပါ မြန်မာလို အသံထွက်ပြီး မျက်နှာ အမူအရာတွေနဲ့ စကားပြောနိုင်ပါတယ်။',
       emotion: 'neutral',
       camera: 'full',
     },
     {
-      id: 3,
+      id: 'scene-3',
       title: 'Scene 3: Conclusion (နိဂုံးချုပ်)',
       script: 'Manga Script တွေ၊ OBS Live တွေအတွက် အချိန်မရွေး သွင်းယူပြီး အသုံးပြုနိုင်ပါပြီခင်ဗျာ။',
       emotion: 'surprised',
@@ -34,14 +48,73 @@ export const VideoStudioPage: React.FC = () => {
 
   const [generatedPlan, setGeneratedPlan] = useState<any | null>(null);
   const [exported, setExported] = useState(false);
+  const [isRenderingVideo, setIsRenderingVideo] = useState(false);
+  const [renderProgress, setRenderProgress] = useState(0);
+  const [renderedVideoUrl, setRenderedVideoUrl] = useState<string | null>(null);
+  const [renderedVideoMimeType, setRenderedVideoMimeType] = useState<string | null>(null);
+  const [videoRenderError, setVideoRenderError] = useState<string | null>(null);
+  const [videoRenderNotice, setVideoRenderNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    // FIX(audit-3-D): populate casting IDs from the backend rather than hardcoding a request ID.
+    fetch(API_ENDPOINTS.characters).then(async (response) => {
+      if (!response.ok) throw new Error('Character list unavailable');
+      const records = await response.json();
+      if (Array.isArray(records) && records.length) {
+        setAvailableCharacters(records);
+        const selected = records.find((item) => item.id === selectedCharacterId) || records[0];
+        setSelectedCharacterId(selected.id);
+        setCharacterName(selected.name);
+        setSelectedModelUrl(selected.vrm_model || '/models/avatar_female_c.vrm');
+        if (selected.voice_id) setVoiceId(selected.voice_id);
+      }
+    }).catch(() => setGenerationError('Character list could not be loaded; check backend availability.'));
+    fetch(API_ENDPOINTS.voices).then(async (response) => {
+      if (!response.ok) throw new Error('Voice list unavailable');
+      const voices = await response.json();
+      if (Array.isArray(voices)) setAvailableVoices(voices);
+    }).catch(() => setVideoRenderError('Voice list could not be loaded; check backend availability.'));
+  }, []);
+
+  const handleAvatarCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
+    avatarCanvasRef.current = canvas;
+    if (canvas && avatarModelStatusRef.current !== 'loading' && resolveAvatarStageRef.current) {
+      resolveAvatarStageRef.current(canvas);
+    }
+  }, []);
+
+  const handleAvatarModelLoadStateChange = useCallback((status: 'loading' | 'vrm' | 'procedural') => {
+    avatarModelStatusRef.current = status;
+    setAvatarModelStatus(status);
+    if (status !== 'loading' && avatarCanvasRef.current && resolveAvatarStageRef.current) {
+      resolveAvatarStageRef.current(avatarCanvasRef.current);
+    }
+  }, []);
+
+  const waitForAvatarStage = useCallback((): Promise<HTMLCanvasElement> => {
+    avatarModelStatusRef.current = 'loading';
+    setAvatarModelStatus('loading');
+    setShowVideoStage(true);
+    return new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        resolveAvatarStageRef.current = null;
+        reject(new Error('3D avatar stage did not finish loading within 30 seconds.'));
+      }, 30000);
+      resolveAvatarStageRef.current = (canvas) => {
+        window.clearTimeout(timeout);
+        resolveAvatarStageRef.current = null;
+        resolve(canvas);
+      };
+    });
+  }, []);
 
   const addScene = () => {
-    const newId = scenes.length + 1;
-    setScenes([
-      ...scenes,
+    const newId = createSceneId();
+    setScenes((current) => [
+      ...current,
       {
         id: newId,
-        title: `Scene ${newId}: Custom Chapter`,
+        title: 'Scene ' + (current.length + 1) + ': Custom Chapter',
         script: 'နောက်ထပ် ဇာတ်ကွက် စာသားကို ဤနေရာတွင် ရေးသားနိုင်ပါသည်။',
         emotion: 'neutral',
         camera: 'bust',
@@ -49,24 +122,27 @@ export const VideoStudioPage: React.FC = () => {
     ]);
   };
 
-  const removeScene = (id: number) => {
+  const removeScene = (id: string) => {
     if (scenes.length <= 1) return;
-    setScenes(scenes.filter((s) => s.id !== id));
+    setScenes((current) => current.filter((s) => s.id !== id));
   };
 
-  const updateScene = (id: number, field: string, val: any) => {
-    setScenes(scenes.map((s) => (s.id === id ? { ...s, [field]: val } : s)));
+  const updateScene = (id: string, field: string, val: any) => {
+    setScenes((current) => current.map((s) => (s.id === id ? { ...s, [field]: val } : s)));
   };
 
   const totalEstimatedSeconds = scenes.length * durationPerScene;
 
   const handleGenerateManifest = async () => {
     setIsGeneratingPlan(true);
+    setGenerationError(null);
+    setGeneratedPlan(null);
     const localManifest = {
       project: 'AuraCraft Studio - Video Render Plan',
       version: '1.0.0',
       aspect_ratio: aspectRatio,
       character: characterName,
+      character_id: selectedCharacterId,
       voice_id: voiceId,
       total_scenes: scenes.length,
       estimated_duration_seconds: totalEstimatedSeconds,
@@ -87,20 +163,20 @@ export const VideoStudioPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          character_id: 'char_anime_shinji',
+          character_id: selectedCharacterId,
+          voice_id: voiceId,
           script: scriptText,
           aspect_ratio: aspectRatio,
           seconds_per_scene: durationPerScene,
         }),
       });
-      if (res.ok) {
-        const plan = await res.json();
-        setGeneratedPlan({ ...localManifest, server_plan: plan });
-      } else {
-        setGeneratedPlan(localManifest);
-      }
-    } catch {
-      setGeneratedPlan(localManifest);
+      if (!res.ok) throw new Error('Backend rejected the render plan (' + res.status + ').');
+      const plan = await res.json();
+      setGeneratedPlan({ ...localManifest, server_plan: plan });
+    } catch (error) {
+      // FIX(audit-3-D): never present a local-only draft as a successful backend render plan.
+      setGeneratedPlan(null);
+      setGenerationError(error instanceof Error ? error.message : 'Render plan generation failed.');
     } finally {
       setIsGeneratingPlan(false);
     }
@@ -119,8 +195,227 @@ export const VideoStudioPage: React.FC = () => {
     setTimeout(() => setExported(false), 3000);
   };
 
+  const handleRenderVideo = async () => {
+    if (!scenes.length || isRenderingVideo) return;
+    if (scenes.length > 10) {
+      setVideoRenderError('Edge-TTS rate limit အတွက် scene ၁၀ ခုထက်မပိုစေရန် ခွဲပြီး render လုပ်ပါ။');
+      return;
+    }
+    if (!('MediaRecorder' in window) || !HTMLCanvasElement.prototype.captureStream || !('AudioContext' in window)) {
+      setVideoRenderError('ဤ browser တွင် audio/video recording မပံ့ပိုးပါ။ Chrome သို့မဟုတ် Edge နောက်ဆုံးဗားရှင်းကို အသုံးပြုပါ။');
+      return;
+    }
+    setIsRenderingVideo(true);
+    setRenderProgress(0);
+    setVideoRenderError(null);
+    setVideoRenderNotice(null);
+    if (renderedVideoUrl) URL.revokeObjectURL(renderedVideoUrl);
+    setRenderedVideoUrl(null);
+    setRenderedVideoMimeType(null);
+
+    const canvas = document.createElement('canvas');
+    const width = aspectRatio === '9:16' ? 720 : 1280;
+    const height = aspectRatio === '9:16' ? 1280 : 720;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      setVideoRenderError('Canvas renderer ကို စတင်၍မရပါ။');
+      setIsRenderingVideo(false);
+      return;
+    }
+
+    let avatarCanvas: HTMLCanvasElement | null = null;
+    const audioContext = new AudioContext();
+    let canvasStream: MediaStream | null = null;
+    let combinedStream: MediaStream | null = null;
+    let recorder: MediaRecorder | null = null;
+
+    const drawScene = (scene: typeof scenes[number], index: number, elapsed: number, sceneDuration: number) => {
+      const progress = Math.min(1, elapsed / sceneDuration);
+      if (avatarCanvas) {
+        ctx.drawImage(avatarCanvas, 0, 0, width, height);
+        ctx.fillStyle = 'rgba(7, 11, 20, 0.28)';
+        ctx.fillRect(0, 0, width, height);
+      } else {
+        const gradient = ctx.createLinearGradient(0, 0, width, height);
+        gradient.addColorStop(0, '#10172b');
+        gradient.addColorStop(0.55, '#25154b');
+        gradient.addColorStop(1, '#071b2b');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = 'rgba(139, 92, 246, 0.12)';
+        ctx.beginPath();
+        ctx.arc(width * (0.82 - progress * 0.12), height * 0.18, Math.min(width, height) * 0.24, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#a78bfa';
+      ctx.font = '600 22px system-ui, sans-serif';
+      ctx.fillText('AURACRAFT STUDIO', width * 0.08, height * 0.1);
+      ctx.fillStyle = '#c4b5fd';
+      ctx.font = '500 18px system-ui, sans-serif';
+      ctx.fillText(`SCENE ${index + 1} / ${scenes.length}  •  ${scene.emotion.toUpperCase()}  •  CAMERA: ${scene.camera.toUpperCase()}`, width * 0.08, height * 0.16);
+
+      const titleSize = aspectRatio === '9:16' ? 34 : 42;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `700 ${titleSize}px system-ui, "Noto Sans Myanmar", sans-serif`;
+      ctx.textBaseline = 'top';
+      ctx.fillText(scene.title.slice(0, 48), width * 0.08, height * 0.31, width * 0.84);
+
+      const fontSize = aspectRatio === '9:16' ? 30 : 34;
+      ctx.font = `400 ${fontSize}px system-ui, "Noto Sans Myanmar", sans-serif`;
+      const maxWidth = width * 0.84;
+      const lines: string[] = [];
+      let line = '';
+      for (const character of Array.from(scene.script)) {
+        const candidate = line + character;
+        if (line && ctx.measureText(candidate).width > maxWidth) {
+          lines.push(line);
+          line = character.trim() ? character : '';
+        } else line = candidate;
+      }
+      if (line) lines.push(line);
+      const visibleLines = lines.slice(0, aspectRatio === '9:16' ? 8 : 5);
+      ctx.fillStyle = '#e2e8f0';
+      visibleLines.forEach((text, lineIndex) => ctx.fillText(text, width * 0.08, height * 0.43 + lineIndex * (fontSize * 1.55), maxWidth));
+
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(width * 0.08, height * 0.88, width * 0.84, 6);
+      ctx.fillStyle = '#a78bfa';
+      ctx.fillRect(width * 0.08, height * 0.88, width * 0.84 * progress, 6);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '16px system-ui, sans-serif';
+      ctx.fillText('AuraCraft Studio • Edge-TTS narration • MP4 / WebM', width * 0.08, height * 0.92);
+    };
+
+    try {
+      await audioContext.resume();
+      avatarCanvas = await waitForAvatarStage();
+      if (avatarModelStatusRef.current === 'procedural') {
+        setVideoRenderNotice('VRM model မဖွင့်နိုင်သောကြောင့် built-in procedural 3D avatar ကို အသုံးပြုထားပါသည်။');
+      }
+      const audioBuffers: AudioBuffer[] = [];
+      for (let index = 0; index < scenes.length; index += 1) {
+        const response = await fetch(API_ENDPOINTS.tts, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: scenes[index].script, voice: voiceId, rate: '+0%', pitch: '+0Hz' }),
+        });
+        if (!response.ok) throw new Error(`Edge-TTS synthesis failed for scene ${index + 1} (${response.status}).`);
+        const audioData = await response.arrayBuffer();
+        audioBuffers.push(await audioContext.decodeAudioData(audioData));
+      }
+
+      const audioDestination = audioContext.createMediaStreamDestination();
+      canvasStream = canvas.captureStream(30);
+      combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioDestination.stream.getAudioTracks(),
+      ]);
+      const mimeCandidates = [
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4;codecs=avc1.42E01E',
+        'video/mp4',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+      ];
+      const supportedMimeTypes = mimeCandidates.filter((candidate) => MediaRecorder.isTypeSupported(candidate));
+      let recorderInstance: MediaRecorder | null = null;
+      for (const candidate of supportedMimeTypes) {
+        try {
+          recorderInstance = new MediaRecorder(combinedStream, { mimeType: candidate });
+          break;
+        } catch {
+          // Try the next browser-supported container/codec combination.
+        }
+      }
+      if (!recorderInstance) recorderInstance = new MediaRecorder(combinedStream);
+      recorder = recorderInstance;
+      const outputMimeType = recorder.mimeType || supportedMimeTypes[0] || 'video/webm';
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      const finished = new Promise<Blob>((resolve, reject) => {
+        if (!recorder) return reject(new Error('Video recorder could not start.'));
+        recorder.onerror = () => reject(new Error('Video encoding failed.'));
+        recorder.onstop = () => resolve(new Blob(chunks, { type: outputMimeType }));
+      });
+
+      let audioStart = audioContext.currentTime + 0.25;
+      audioBuffers.forEach((buffer) => {
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioDestination);
+        source.start(audioStart);
+        audioStart += buffer.duration;
+      });
+
+      recorder.start(250);
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      const frameMs = 1000 / 30;
+      const totalDuration = audioBuffers.reduce((sum, buffer) => sum + buffer.duration, 0);
+      let renderedSeconds = 0;
+      for (let sceneIndex = 0; sceneIndex < scenes.length; sceneIndex += 1) {
+        setAvatarEmotion(scenes[sceneIndex].emotion);
+        setIsAvatarSpeaking(true);
+        const sceneDuration = audioBuffers[sceneIndex].duration;
+        const totalFrames = Math.max(1, Math.ceil(sceneDuration * 30));
+        for (let frame = 0; frame < totalFrames; frame += 1) {
+          drawScene(scenes[sceneIndex], sceneIndex, frame / 30, sceneDuration);
+          setRenderProgress(Math.min(100, Math.round(((renderedSeconds + frame / 30) / totalDuration) * 100)));
+          await new Promise((resolve) => window.setTimeout(resolve, frameMs));
+        }
+        renderedSeconds += sceneDuration;
+        setIsAvatarSpeaking(false);
+      }
+      recorder.stop();
+      const blob = await finished;
+      if (!blob.size) throw new Error('The browser produced an empty video file.');
+      setRenderProgress(100);
+      setRenderedVideoMimeType(blob.type || outputMimeType);
+      setRenderedVideoUrl(URL.createObjectURL(blob));
+    } catch (error) {
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      setVideoRenderError(error instanceof Error ? error.message : 'Video rendering failed.');
+    } finally {
+      canvasStream?.getTracks().forEach((track) => track.stop());
+      combinedStream?.getTracks().forEach((track) => track.stop());
+      await audioContext.close().catch(() => undefined);
+      setIsAvatarSpeaking(false);
+      setShowVideoStage(false);
+      avatarCanvasRef.current = null;
+      avatarModelStatusRef.current = 'idle';
+      setAvatarModelStatus('idle');
+      resolveAvatarStageRef.current = null;
+      setIsRenderingVideo(false);
+    }
+  };
+
+  const handleDownloadVideo = () => {
+    if (!renderedVideoUrl) return;
+    const link = document.createElement('a');
+    link.href = renderedVideoUrl;
+    const extension = renderedVideoMimeType?.includes('mp4') ? 'mp4' : 'webm';
+    link.download = `auracraft_storyboard_${aspectRatio.replace(':', 'x')}.${extension}`;
+    link.click();
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0a0d14] text-slate-100 overflow-y-auto p-6 space-y-6">
+      {showVideoStage && (
+        <div aria-hidden="true" style={{ position: 'fixed', left: '-2200px', top: 0, width: aspectRatio === '9:16' ? 720 : 1280, height: aspectRatio === '9:16' ? 1280 : 720, opacity: 0, pointerEvents: 'none', zIndex: -1 }}>
+          <Viewport3D
+            key={aspectRatio}
+            currentEmotion={avatarEmotion}
+            bgMode="cyber"
+            isSpeaking={isAvatarSpeaking}
+            currentModelUrl={selectedModelUrl}
+            currentModelName={characterName}
+            onCanvasReady={handleAvatarCanvasReady}
+            onModelLoadStateChange={handleAvatarModelLoadStateChange}
+          />
+        </div>
+      )}
       {/* Header */}
       <div className="border-b border-[#1f293d] pb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -144,6 +439,7 @@ export const VideoStudioPage: React.FC = () => {
           <div className="flex items-center gap-1 bg-[#111726] border border-[#23314f] p-1 rounded-xl text-xs">
             <button
               onClick={() => setAspectRatio('9:16')}
+              disabled={isRenderingVideo}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-semibold transition-all ${
                 aspectRatio === '9:16'
                   ? 'bg-purple-600 text-white shadow-md'
@@ -155,6 +451,7 @@ export const VideoStudioPage: React.FC = () => {
             </button>
             <button
               onClick={() => setAspectRatio('16:9')}
+              disabled={isRenderingVideo}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-semibold transition-all ${
                 aspectRatio === '16:9'
                   ? 'bg-purple-600 text-white shadow-md'
@@ -258,12 +555,36 @@ export const VideoStudioPage: React.FC = () => {
             <div className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-400 font-medium mb-1">Casting Actor</label>
-                <input
-                  type="text"
-                  value={characterName}
-                  onChange={(e) => setCharacterName(e.target.value)}
+                <select
+                  value={selectedCharacterId}
+                  onChange={(e) => {
+                    const selected = availableCharacters.find((item) => item.id === e.target.value);
+                    setSelectedCharacterId(e.target.value);
+                    if (selected) {
+                      setCharacterName(selected.name);
+                      setSelectedModelUrl(selected.vrm_model || '/models/avatar_female_c.vrm');
+                      if (selected.voice_id) setVoiceId(selected.voice_id);
+                    }
+                  }}
                   className="w-full bg-[#0a0d14] border border-[#23314f] rounded-xl px-3 py-2 text-slate-100 text-xs"
-                />
+                >
+                  {availableCharacters.map((character) => (
+                    <option key={character.id} value={character.id}>{character.name}</option>
+                  ))}
+                  {!availableCharacters.length && <option value={selectedCharacterId}>{characterName}</option>}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Narration Voice (Edge-TTS)</label>
+                <select
+                  value={voiceId}
+                  onChange={(e) => setVoiceId(e.target.value)}
+                  className="w-full bg-[#0a0d14] border border-[#23314f] rounded-xl px-3 py-2 text-slate-100 text-xs"
+                >
+                  {availableVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
+                  {!availableVoices.length && <option value={voiceId}>{voiceId}</option>}
+                </select>
               </div>
 
               <div>
@@ -283,6 +604,7 @@ export const VideoStudioPage: React.FC = () => {
               </div>
             </div>
 
+            {generationError && <p role="alert" className="text-xs text-rose-300">{generationError}</p>}
             <div className="pt-3 border-t border-[#1f293d] flex gap-2">
               <button
                 onClick={handleGenerateManifest}
@@ -299,6 +621,31 @@ export const VideoStudioPage: React.FC = () => {
                 )}
               </button>
             </div>
+          </div>
+
+          <div className="bg-[#111726]/80 border border-[#1f293d] rounded-2xl p-5 space-y-3">
+            <div>
+              <h3 className="text-sm font-bold text-white">Render narrated storyboard video</h3>
+              <p className="text-xs text-slate-400 mt-1">Browser-side 3D avatar video with Edge-TTS narration. MP4 is used when your browser supports it; otherwise WebM is used. A procedural 3D fallback appears if a selected VRM asset cannot load.</p>
+            </div>
+            <button
+              onClick={handleRenderVideo}
+              disabled={isRenderingVideo || !scenes.length}
+              className="w-full py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-2"
+            >
+              {isRenderingVideo ? <><Loader2 className="w-4 h-4 animate-spin" /> Rendering {renderProgress}%</> : <><Play className="w-4 h-4" /> Render Video (MP4 / WebM)</>}
+            </button>
+            {showVideoStage && avatarModelStatus === 'loading' && <p className="text-xs text-slate-400">Loading the selected 3D avatar…</p>}
+            {videoRenderError && <p role="alert" className="text-xs text-rose-300">{videoRenderError}</p>}
+            {videoRenderNotice && <p className="text-xs text-amber-300">{videoRenderNotice}</p>}
+            {renderedVideoUrl && (
+              <div className="space-y-2">
+                <video controls playsInline src={renderedVideoUrl} className="w-full rounded-xl border border-[#23314f]" />
+                <button onClick={handleDownloadVideo} className="w-full py-2 rounded-xl bg-emerald-700/70 hover:bg-emerald-600 text-white text-xs font-semibold flex items-center justify-center gap-2">
+                  <Download className="w-4 h-4" /> Download rendered {renderedVideoMimeType?.includes('mp4') ? 'MP4' : 'WebM'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Manifest JSON Preview */}

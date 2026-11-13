@@ -6,6 +6,10 @@ import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm';
 import { lipSync } from '../audio/lipSyncAnalyzer';
 import { Upload, User, Sparkles, RefreshCw, CheckCircle2, RotateCcw, Maximize2, Eye, UserCheck, Camera, Globe } from 'lucide-react';
 import { translations, type Language } from '../utils/i18n';
+import { API_BASE_URL } from '../config/api';
+
+// FIX(audit-3-C): enable Three.js resource caching so repeated VRM URLs reuse fetched assets.
+THREE.Cache.enabled = true;
 
 interface Viewport3DProps {
   currentEmotion: string;
@@ -16,6 +20,8 @@ interface Viewport3DProps {
   currentModelName?: string;
   lang?: Language;
   onModelChange?: (url: string, name: string) => void;
+  onCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
+  onModelLoadStateChange?: (state: 'loading' | 'vrm' | 'procedural') => void;
 }
 
 type CameraPreset = 'face' | 'bust' | 'full';
@@ -107,6 +113,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   currentModelName = '🌸 Sakura (Anime Idol)',
   lang = 'en',
   onModelChange,
+  onCanvasReady,
+  onModelLoadStateChange,
 }) => {
   const t = translations[lang] || translations.en;
   const mountRef = useRef<HTMLDivElement>(null);
@@ -118,6 +126,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   // Active VRM Avatar
   const currentVrmRef = useRef<VRM | null>(null);
+  const runtimePropsRef = useRef({ currentEmotion, isSpeaking });
+  const loadVRMModelRef = useRef<(source: string | ArrayBuffer, name?: string) => void>(() => undefined);
   const mouseTargetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [avatarMode, setAvatarMode] = useState<'vrm' | 'procedural'>('vrm');
   const [modelLoading, setModelLoading] = useState(false);
@@ -216,6 +226,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     if (!scene) return;
 
     setModelLoading(true);
+    onModelLoadStateChange?.('loading');
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
 
@@ -224,6 +235,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (!vrm) {
         console.warn('GLTF parsed but no VRM data found, keeping fallback');
         setModelLoading(false);
+        onModelLoadStateChange?.('procedural');
         return;
       }
 
@@ -262,6 +274,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       setAvatarMode('vrm');
       setModelName(name);
       setModelLoading(false);
+      onModelLoadStateChange?.('vrm');
 
       // Re-apply custom hair color if set
       if (selectedHairColor) {
@@ -306,6 +319,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const onError = (error: any) => {
       console.error('Failed to load VRM model:', error);
       setModelLoading(false);
+      onModelLoadStateChange?.('procedural');
       if (proceduralGroupRef.current) {
         proceduralGroupRef.current.visible = true;
       }
@@ -313,7 +327,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     };
 
     if (typeof source === 'string') {
-      loader.load(source, onLoad, undefined, onError);
+      // FIX(audit-2-B): imported VRM API paths must resolve through the edge gateway, not the static-site origin.
+      const resolvedSource = typeof source === 'string' && source.startsWith('/api/')
+        ? API_BASE_URL + source
+        : source;
+      loader.load(resolvedSource, onLoad, undefined, onError);
     } else {
       loader.parse(source, '', onLoad, onError);
     }
@@ -568,12 +586,14 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
       antialias: true,
       alpha: true,
       powerPreference: 'high-performance',
+      preserveDrawingBuffer: Boolean(onCanvasReady),
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+    onCanvasReady?.(renderer.domElement);
 
     // 4. OrbitControls (Full 360° mouse rotation, zoom in/out to see full body)
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -709,25 +729,6 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
     proceduralGroup.add(headGroup);
     scene.add(proceduralGroup);
 
-    // Initial load: 3D Anime Avatar — find matching preset and auto-apply its colors
-    const initUrl = currentModelUrl || '/models/avatar_female_a.vrm';
-    const initName = currentModelName || '💙 Aoi 3D (Blue Hair Kimono - ပုံ ၄ အတိုင်း 3D)';
-    const matchedPreset = PRESET_3D_MODELS.find(p => p.url === initUrl && p.name === initName)
-      || PRESET_3D_MODELS.find(p => p.url === initUrl)
-      || PRESET_3D_MODELS[0];
-    loadVRMModel(matchedPreset.url, matchedPreset.name);
-    // Apply preset hair/outfit/eye colors after model loads
-    setTimeout(() => {
-      if (matchedPreset?.hairColor) applyHairColor(matchedPreset.hairColor);
-      if (matchedPreset?.outfitColor) applyOutfitColor(matchedPreset.outfitColor);
-      if (matchedPreset?.eyeColor) applyEyeColor(matchedPreset.eyeColor);
-    }, 600);
-    setTimeout(() => {
-      if (matchedPreset?.hairColor) applyHairColor(matchedPreset.hairColor);
-      if (matchedPreset?.outfitColor) applyOutfitColor(matchedPreset.outfitColor);
-      if (matchedPreset?.eyeColor) applyEyeColor(matchedPreset.eyeColor);
-    }, 1500);
-
     // 8. Animation Engine
     let animationFrameId: number;
     const clock = new THREE.Clock();
@@ -764,6 +765,7 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
       currentMouse.y += (mouseTargetRef.current.y - currentMouse.y) * 0.05;
 
       const vrm = currentVrmRef.current;
+      const { currentEmotion: emotion, isSpeaking: speaking } = runtimePropsRef.current;
       const visemes = lipSync.getVisemes();
 
       // --- VRM Humanoid Animation Path ---
@@ -802,8 +804,8 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
 
         // Real-Time Lip Sync Visemes on Human Face
         if (vrm.expressionManager) {
-          if (visemes.volume > 0.04 || isSpeaking) {
-            const openVal = Math.min(1.0, Math.max(visemes.aa, visemes.volume * 2.0, isSpeaking ? 0.4 + Math.sin(time * 14) * 0.35 : 0));
+          if (visemes.volume > 0.04 || speaking) {
+            const openVal = Math.min(1.0, Math.max(visemes.aa, visemes.volume * 2.0, speaking ? 0.4 + Math.sin(time * 14) * 0.35 : 0));
             vrm.expressionManager.setValue('aa', openVal);
             vrm.expressionManager.setValue('ih', visemes.ee * 0.7);
             vrm.expressionManager.setValue('ou', visemes.oh * 0.8);
@@ -814,11 +816,11 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
           }
 
           // Emotional Facial Blendshapes
-          vrm.expressionManager.setValue('happy', currentEmotion === 'happy' ? 0.8 : 0);
-          vrm.expressionManager.setValue('angry', currentEmotion === 'angry' ? 0.75 : 0);
-          vrm.expressionManager.setValue('sad', currentEmotion === 'sad' ? 0.7 : 0);
-          vrm.expressionManager.setValue('surprised', currentEmotion === 'surprised' ? 0.8 : 0);
-          vrm.expressionManager.setValue('relaxed', currentEmotion === 'neutral' ? 0.2 : 0);
+          vrm.expressionManager.setValue('happy', emotion === 'happy' ? 0.8 : 0);
+          vrm.expressionManager.setValue('angry', emotion === 'angry' ? 0.75 : 0);
+          vrm.expressionManager.setValue('sad', emotion === 'sad' ? 0.7 : 0);
+          vrm.expressionManager.setValue('surprised', emotion === 'surprised' ? 0.8 : 0);
+          vrm.expressionManager.setValue('relaxed', emotion === 'neutral' ? 0.2 : 0);
 
           vrm.expressionManager.update();
         }
@@ -831,8 +833,8 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
           headGroup.rotation.y = headSway;
         }
         if (mouth) {
-          if (visemes.volume > 0.05 || isSpeaking) {
-            const openAmount = Math.max(visemes.aa, visemes.volume * 1.5, isSpeaking ? 0.4 + Math.sin(time * 15) * 0.3 : 0);
+          if (visemes.volume > 0.05 || speaking) {
+            const openAmount = Math.max(visemes.aa, visemes.volume * 1.5, speaking ? 0.4 + Math.sin(time * 15) * 0.3 : 0);
             mouth.scale.set(1.0 + visemes.ee * 0.5, 0.4 + openAmount * 2.5, 0.8);
           } else {
             mouth.scale.set(1.0, 0.2, 0.8);
@@ -861,14 +863,48 @@ const createAnimeClothTexture = (hexColor: string): THREE.CanvasTexture => {
       container.removeEventListener('pointermove', handlePointerMove);
       controls.dispose();
       renderer.dispose();
-      if (currentVrmRef.current) {
-        VRMUtils.deepDispose(currentVrmRef.current.scene);
-      }
+      // FIX(audit-3-C): dispose the complete scene graph on unmount, including VRM and procedural assets.
+      VRMUtils.deepDispose(scene);
+      currentVrmRef.current = null;
+      sceneRef.current = null;
+      rendererRef.current = null;
+      onCanvasReady?.(null);
+      cameraRef.current = null;
+      controlsRef.current = null;
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, [bgMode, currentEmotion, isSpeaking]);
+  }, [onCanvasReady, onModelLoadStateChange]);
+
+  // FIX(audit-3-C): keep animation state current without rebuilding the WebGL scene.
+  useEffect(() => {
+    runtimePropsRef.current = { currentEmotion, isSpeaking };
+  }, [currentEmotion, isSpeaking]);
+
+  // FIX(audit-3-C): background changes update the existing scene instead of recreating renderer resources.
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    sceneRef.current.background = bgMode === 'greenscreen'
+      ? new THREE.Color(0x00ff00)
+      : bgMode === 'transparent' ? null : new THREE.Color(0x0a0d14);
+  }, [bgMode]);
+
+  // FIX(audit-3-C): load/switch models independently from the mount-only scene lifecycle.
+  loadVRMModelRef.current = loadVRMModel;
+  useEffect(() => {
+    loadVRMModelRef.current(currentModelUrl, currentModelName);
+  }, [currentModelUrl, currentModelName]);
+
+  // Reapply preset colors after a newly selected model has finished loading.
+  useEffect(() => {
+    if (modelLoading) return;
+    const preset = PRESET_3D_MODELS.find((item) => item.url === currentModelUrl && item.name === currentModelName)
+      || PRESET_3D_MODELS.find((item) => item.url === currentModelUrl);
+    if (preset?.hairColor) applyHairColor(preset.hairColor);
+    if (preset?.outfitColor) applyOutfitColor(preset.outfitColor);
+    if (preset?.eyeColor) applyEyeColor(preset.eyeColor);
+  }, [modelLoading, currentModelUrl, currentModelName]);
 
   return (
     <div className="relative w-full h-full overflow-hidden select-none">

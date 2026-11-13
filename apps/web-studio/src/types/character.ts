@@ -188,7 +188,7 @@ export interface AuraManifest {
   characterName: string;
 
   /** SHA-256 hex digest of model.vrm */
-  vrmChecksum?: string;
+  vrmChecksum: string;
 
   /** Identity prompt at export time */
   identityPrompt: string;
