@@ -1,6 +1,6 @@
-name = "auracraft-studio-telegram-worker"
+name = "auracraft-studio-edge"
 main = "index.js"
-compatibility_date = "2026-11-10"
+compatibility_date = "2024-11-10"
 
 # Zero-Cost Free Tier Worker Configuration
 # Free allowance: 100,000 requests per day across Cloudflare Edge
