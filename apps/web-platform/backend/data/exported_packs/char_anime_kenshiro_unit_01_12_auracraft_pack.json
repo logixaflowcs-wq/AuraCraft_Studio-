@@ -1,0 +1,31 @@
+{
+  "export_version": "1.0.0",
+  "source_studio": "AuraCraft Studio",
+  "actor_id": "char_anime_kenshiro_unit_01_12",
+  "actor_name": "Kenshiro Unit 01",
+  "role": "Cyber Combat Mecha",
+  "style": "anime",
+  "voice_binding": {
+    "engine": "edge-tts",
+    "voice_id": "ja-JP-KeitaNeural",
+    "language": "ja-JP"
+  },
+  "vrm_model_path": "/models/avatar_female_a.vrm",
+  "avatar_color": "#06b6d4",
+  "expression_map": {
+    "neutral": "blendshape_neutral",
+    "happy": "blendshape_happy",
+    "angry": "blendshape_angry",
+    "sad": "blendshape_sad",
+    "surprised": "blendshape_surprised"
+  },
+  "character_meta": {
+    "personality_prompt": "Fearless vanguard mecha pilot",
+    "style": "anime",
+    "tags": [
+      "anime",
+      "mecha",
+      "combat"
+    ]
+  }
+}
